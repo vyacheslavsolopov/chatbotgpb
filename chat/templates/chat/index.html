@@ -167,7 +167,7 @@
             <div class="mt-2 flex flex-wrap gap-2">
               ${suggestions.map(s => `
                 <button class="suggestion-btn px-3 py-1 bg-white text-orange-700 rounded-full text-sm border border-orange-300 hover:bg-orange-100 transition">
-                  ${s.text}
+                  ${marked.parse(s.text)}
                 </button>
               `).join('')}
             </div>`;
@@ -180,7 +180,7 @@
             </div>
           </div>
           <div class="bg-blue-50 rounded-lg p-3 max-w-[80%]">
-            <p class="text-gray-800">${text}</p>
+            <p class="text-gray-800">${marked.parse(text)}</p>
             ${suggestionsHtml}
           </div>`;
             }
