@@ -25,13 +25,6 @@ def api_chat(request):
         data = json.loads(request.body)
         user_msg = data.get('message', '').strip()
 
-        # Получаем кнопки для текущего контекста
-        buttons = [{'text': 'text 1'}, {'text': 'text 2'}]
-
-        # Если кнопок нет, возвращаем кнопки общего контекста
-        if not buttons:
-            buttons = list(SuggestionButton.objects.filter(context='general').values('text'))
-
         found = get_relevant_chunks(user_msg, top_k=30)
 
         prompt = f"Найдены документы по запросу пользователя: {' '.join(found)}."
@@ -42,6 +35,16 @@ def api_chat(request):
 
         # Формируем ответное сообщение
         response_message = wait_for_one_message()
+
+        send_to_queue(
+            response_message + "Предложи три вопроса, которые может задать пользователь далее. Ответ строго в формате списка и ничего больше: [\"Вопрос 1\", \"Вопрос 2\", \"Вопрос 3\"]")
+
+        try:
+            text_list = wait_for_one_message()[2:-3].split('\", \"')
+            buttons = [{'text': t.strip()} for t in text_list]
+        except Exception as e:
+            print(e)
+            buttons = []
 
         return JsonResponse({
             'message': response_message,
