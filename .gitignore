@@ -2,7 +2,7 @@
 
 .idea
 .venv/
-chatbotgpb/chat/__pycache__
+chat/__pycache__
 # в корне вашего репо
 __pycache__/
 *.pyc

@@ -103,15 +103,11 @@
               Здравствуйте! Я виртуальный помощник Газпромбанка. Чем могу помочь Вам сегодня?
             </p>
             <div class="mt-2 flex flex-wrap gap-2">
+              {% for button in initial_buttons %}
               <button class="suggestion-btn px-3 py-1 bg-white text-orange-700 rounded-full text-sm border border-orange-300 hover:bg-orange-100 transition">
-                Проверить баланс
+                {{ button.text }}
               </button>
-              <button class="suggestion-btn px-3 py-1 bg-white text-orange-700 rounded-full text-sm border border-orange-300 hover:bg-orange-100 transition">
-                Перевод средств
-              </button>
-              <button class="suggestion-btn px-3 py-1 bg-white text-orange-700 rounded-full text-sm border border-orange-300 hover:bg-orange-100 transition">
-                Кредитные предложения
-              </button>
+              {% endfor %}
             </div>
           </div>
         </div>
@@ -145,7 +141,7 @@
     const btn    = document.getElementById("send-button");
     const chat   = document.getElementById("chat-messages");
 
-    function addMessage(text, sender) {
+    function addMessage(text, sender, suggestions = null) {
       const el = document.createElement("div");
       el.className = `flex space-x-3 message-animate ${sender==='user'?'justify-end':''}`;
       if (sender === 'user') {
@@ -159,6 +155,18 @@
             </div>
           </div>`;
       } else {
+        let suggestionsHtml = '';
+        if (suggestions && suggestions.length > 0) {
+          suggestionsHtml = `
+            <div class="mt-2 flex flex-wrap gap-2">
+              ${suggestions.map(s => `
+                <button class="suggestion-btn px-3 py-1 bg-white text-orange-700 rounded-full text-sm border border-orange-300 hover:bg-orange-100 transition">
+                  ${s.text}
+                </button>
+              `).join('')}
+            </div>`;
+        }
+        
         el.innerHTML = `
           <div class="flex-shrink-0">
             <div class="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center">
@@ -167,10 +175,21 @@
           </div>
           <div class="bg-blue-50 rounded-lg p-3 max-w-[80%]">
             <p class="text-gray-800">${text}</p>
+            ${suggestionsHtml}
           </div>`;
       }
       chat.appendChild(el);
       chat.scrollTop = chat.scrollHeight;
+      
+      // Добавляем обработчики для новых кнопок
+      if (suggestions) {
+        el.querySelectorAll(".suggestion-btn").forEach(b => {
+          b.addEventListener("click", () => {
+            input.value = b.textContent.trim();
+            input.focus();
+          });
+        });
+      }
     }
 
     function showTypingIndicator() {
@@ -212,9 +231,9 @@
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ message: text }),
         });
-        const { message } = await res.json();
+        const { message, suggestions } = await res.json();
         removeTypingIndicator();
-        addMessage(message, 'ai');
+        addMessage(message, 'ai', suggestions);
       } catch (e) {
         removeTypingIndicator();
         addMessage("Ошибка сервера, попробуйте позже.", 'ai');

@@ -1,0 +1,191 @@
+[
+  {
+    "model": "chat.suggestionbutton",
+    "pk": 1,
+    "fields": {
+      "text": "Проверить баланс",
+      "context": "initial",
+      "order": 1
+    }
+  },
+  {
+    "model": "chat.suggestionbutton",
+    "pk": 2,
+    "fields": {
+      "text": "Перевод средств",
+      "context": "initial",
+      "order": 2
+    }
+  },
+  {
+    "model": "chat.suggestionbutton",
+    "pk": 3,
+    "fields": {
+      "text": "Кредитные предложения",
+      "context": "initial",
+      "order": 3
+    }
+  },
+  {
+    "model": "chat.suggestionbutton",
+    "pk": 4,
+    "fields": {
+      "text": "Показать историю операций",
+      "context": "balance",
+      "order": 1
+    }
+  },
+  {
+    "model": "chat.suggestionbutton",
+    "pk": 5,
+    "fields": {
+      "text": "Пополнить счет",
+      "context": "balance",
+      "order": 2
+    }
+  },
+  {
+    "model": "chat.suggestionbutton",
+    "pk": 6,
+    "fields": {
+      "text": "Перевод по номеру карты",
+      "context": "transfer",
+      "order": 1
+    }
+  },
+  {
+    "model": "chat.suggestionbutton",
+    "pk": 7,
+    "fields": {
+      "text": "Перевод по номеру телефона",
+      "context": "transfer",
+      "order": 2
+    }
+  },
+  {
+    "model": "chat.suggestionbutton",
+    "pk": 8,
+    "fields": {
+      "text": "Кредит наличными",
+      "context": "credit",
+      "order": 1
+    }
+  },
+  {
+    "model": "chat.suggestionbutton",
+    "pk": 9,
+    "fields": {
+      "text": "Ипотека",
+      "context": "credit",
+      "order": 2
+    }
+  },
+  {
+    "model": "chat.suggestionbutton",
+    "pk": 10,
+    "fields": {
+      "text": "Оформить карту",
+      "context": "card",
+      "order": 1
+    }
+  },
+  {
+    "model": "chat.suggestionbutton",
+    "pk": 11,
+    "fields": {
+      "text": "Заблокировать карту",
+      "context": "card",
+      "order": 2
+    }
+  },
+  {
+    "model": "chat.suggestionbutton",
+    "pk": 12,
+    "fields": {
+      "text": "Открыть вклад",
+      "context": "deposit",
+      "order": 1
+    }
+  },
+  {
+    "model": "chat.suggestionbutton",
+    "pk": 13,
+    "fields": {
+      "text": "Рассчитать доход",
+      "context": "deposit",
+      "order": 2
+    }
+  },
+  {
+    "model": "chat.suggestionbutton",
+    "pk": 14,
+    "fields": {
+      "text": "Страхование жизни",
+      "context": "insurance",
+      "order": 1
+    }
+  },
+  {
+    "model": "chat.suggestionbutton",
+    "pk": 15,
+    "fields": {
+      "text": "Страхование имущества",
+      "context": "insurance",
+      "order": 2
+    }
+  },
+  {
+    "model": "chat.suggestionbutton",
+    "pk": 16,
+    "fields": {
+      "text": "Установить приложение",
+      "context": "mobile",
+      "order": 1
+    }
+  },
+  {
+    "model": "chat.suggestionbutton",
+    "pk": 17,
+    "fields": {
+      "text": "Настроить уведомления",
+      "context": "mobile",
+      "order": 2
+    }
+  },
+  {
+    "model": "chat.suggestionbutton",
+    "pk": 18,
+    "fields": {
+      "text": "Связаться с оператором",
+      "context": "support",
+      "order": 1
+    }
+  },
+  {
+    "model": "chat.suggestionbutton",
+    "pk": 19,
+    "fields": {
+      "text": "Задать вопрос",
+      "context": "support",
+      "order": 2
+    }
+  },
+  {
+    "model": "chat.suggestionbutton",
+    "pk": 20,
+    "fields": {
+      "text": "Вернуться в главное меню",
+      "context": "general",
+      "order": 1
+    }
+  },
+  {
+    "model": "chat.suggestionbutton",
+    "pk": 21,
+    "fields": {
+      "text": "Другие услуги",
+      "context": "general",
+      "order": 2
+    }
+  }
+] 
