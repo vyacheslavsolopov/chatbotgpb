@@ -4,6 +4,9 @@ import time
 from django.shortcuts import render
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
+
+from qdrant.search import get_relevant_chunks
+from server_site.send_user_query import send_to_queue, wait_for_one_message
 from .models import SuggestionButton
 
 
@@ -22,20 +25,23 @@ def api_chat(request):
         data = json.loads(request.body)
         user_msg = data.get('message', '').strip()
 
-        # Определяем контекст разговора
-        context = ['Тест 1', 'Тест 2', 'Тест 3']
-
         # Получаем кнопки для текущего контекста
-        buttons = list(SuggestionButton.objects.filter(context=context).values('text'))
+        buttons = [{'text': 'text 1'}, {'text': 'text 2'}]
 
         # Если кнопок нет, возвращаем кнопки общего контекста
         if not buttons:
             buttons = list(SuggestionButton.objects.filter(context='general').values('text'))
 
-        # Формируем ответное сообщение
-        response_message = ''
+        found = get_relevant_chunks(user_msg, top_k=30)
 
-        time.sleep(2)
+        prompt = f"Найдены документы по запросу пользователя: {' '.join(found)}."
+        prompt = prompt.replace('\n', ' ')
+        prompt = prompt + "\n Пользователь написал: \n" + user_msg
+
+        send_to_queue(prompt)
+
+        # Формируем ответное сообщение
+        response_message = wait_for_one_message()
 
         return JsonResponse({
             'message': response_message,

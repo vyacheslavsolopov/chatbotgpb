@@ -87,9 +87,9 @@ def send_to_queue(user_query):
         channel = connection.channel()
         print('соединение установлено')
 
-        channel.queue_declare(queue='to_user')
+        channel.queue_declare(queue='to_user_fixed', durable=True)
 
-        channel.basic_publish(exchange='', routing_key='to_user', body=user_query)
+        channel.basic_publish(exchange='', routing_key='to_user_fixed', body=user_query)
         print("сообщение добавлено в очередь")
         connection.close()
     except pika.exceptions.AMQPConnectionError as e:

@@ -1,163 +1,169 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Газпромбанк - Виртуальный помощник</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <link
-    rel="stylesheet"
-    href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
-  />
-  <style>
-    @keyframes fadeIn {
-      from {
-        opacity: 0;
-        transform: translateY(10px);
-      }
-      to {
-        opacity: 1;
-        transform: translateY(0);
-      }
-    }
-    .message-animate {
-      animation: fadeIn 0.3s ease-out forwards;
-    }
-    .typing-indicator span {
-      display: inline-block;
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background-color: #ffffff;
-      margin: 0 2px;
-    }
-    .typing-indicator span:nth-child(1) {
-      animation: bounce 1s infinite;
-    }
-    .typing-indicator span:nth-child(2) {
-      animation: bounce 1s 0.2s infinite;
-    }
-    .typing-indicator span:nth-child(3) {
-      animation: bounce 1s 0.4s infinite;
-    }
-    @keyframes bounce {
-      0%, 100% {
-        transform: translateY(0);
-      }
-      50% {
-        transform: translateY(-5px);
-      }
-    }
-    /* Задаём фиксированную высоту для всего контейнера чата */
-    .chat-container {
-      height: calc(100vh - 160px);
-    }
-  </style>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>Газпромбанк - Виртуальный помощник</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <link
+            rel="stylesheet"
+            href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
+    />
+    <style>
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .message-animate {
+            animation: fadeIn 0.3s ease-out forwards;
+        }
+
+        .typing-indicator span {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background-color: #ffffff;
+            margin: 0 2px;
+        }
+
+        .typing-indicator span:nth-child(1) {
+            animation: bounce 1s infinite;
+        }
+
+        .typing-indicator span:nth-child(2) {
+            animation: bounce 1s 0.2s infinite;
+        }
+
+        .typing-indicator span:nth-child(3) {
+            animation: bounce 1s 0.4s infinite;
+        }
+
+        @keyframes bounce {
+            0%, 100% {
+                transform: translateY(0);
+            }
+            50% {
+                transform: translateY(-5px);
+            }
+        }
+
+        /* Задаём фиксированную высоту для всего контейнера чата */
+        .chat-container {
+            height: calc(100vh - 160px);
+        }
+    </style>
 </head>
 <body class="bg-gray-50 font-sans">
-  <div class="max-w-4xl mx-auto p-4">
+<div class="max-w-4xl mx-auto p-4">
     <!-- Header -->
     <header class="flex items-center justify-between mb-6">
-      <div class="flex items-center space-x-3">
-        <div class="w-10 h-10 rounded-full bg-blue-900 flex items-center justify-center">
-          <i class="fas fa-university text-white text-xl"></i>
+        <div class="flex items-center space-x-3">
+            <div class="w-10 h-10 rounded-full bg-blue-900 flex items-center justify-center">
+                <i class="fas fa-university text-white text-xl"></i>
+            </div>
+            <h1 class="text-2xl font-bold text-gray-800">Газпромбанк</h1>
         </div>
-        <h1 class="text-2xl font-bold text-gray-800">Газпромбанк</h1>
-      </div>
-      <div class="flex space-x-4">
-        <button class="text-gray-500 hover:text-blue-900 transition">
-          <i class="fas fa-sun"></i>
-        </button>
-        <button class="text-gray-500 hover:text-blue-900 transition">
-          <i class="fas fa-cog"></i>
-        </button>
-      </div>
+        <div class="flex space-x-4">
+            <button class="text-gray-500 hover:text-blue-900 transition">
+                <i class="fas fa-sun"></i>
+            </button>
+            <button class="text-gray-500 hover:text-blue-900 transition">
+                <i class="fas fa-cog"></i>
+            </button>
+        </div>
     </header>
 
     <!-- Chat Container с flex-колонкой -->
     <div class="bg-white rounded-xl shadow-md overflow-hidden chat-container flex flex-col">
-      <!-- Chat Header с градиентом от синего к оранжевому -->
-      <div class="bg-gradient-to-r from-blue-900 to-orange-500 text-white p-4 flex items-center justify-between">
-        <div class="flex items-center space-x-3">
-          <div class="w-8 h-8 rounded-full bg-blue-700 flex items-center justify-center">
-            <i class="fas fa-university text-white"></i>
-          </div>
-          <span class="font-medium">Помощник Газпромбанка</span>
-        </div>
-        <div class="text-blue-200 text-sm">
-          <span id="current-time">Загрузка...</span>
-        </div>
-      </div>
-
-      <!-- Messages Area. flex-grow занимает всё доступное пространство -->
-      <div id="chat-messages" class="flex-grow p-4 space-y-4 overflow-y-auto">
-        <!-- Welcome Message -->
-        <div class="flex space-x-3 message-animate">
-          <div class="flex-shrink-0">
-            <div class="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center">
-              <i class="fas fa-university text-blue-900"></i>
+        <!-- Chat Header с градиентом от синего к оранжевому -->
+        <div class="bg-gradient-to-r from-blue-900 to-orange-500 text-white p-4 flex items-center justify-between">
+            <div class="flex items-center space-x-3">
+                <div class="w-8 h-8 rounded-full bg-blue-700 flex items-center justify-center">
+                    <i class="fas fa-university text-white"></i>
+                </div>
+                <span class="font-medium">Помощник Газпромбанка</span>
             </div>
-          </div>
-          <div class="bg-blue-50 rounded-lg p-3 max-w-[80%]">
-            <p class="text-gray-800">
-              Здравствуйте! Я виртуальный помощник Газпромбанка. Чем могу помочь Вам сегодня?
-            </p>
-            <div class="mt-2 flex flex-wrap gap-2">
-              {% for button in initial_buttons %}
-              <button class="suggestion-btn px-3 py-1 bg-white text-orange-700 rounded-full text-sm border border-orange-300 hover:bg-orange-100 transition">
-                {{ button.text }}
-              </button>
-              {% endfor %}
-            </div>
-          </div>
         </div>
-      </div>
 
-      <!-- Input Area. Фиксирована внизу контейнера -->
-      <div class="border-t p-4 bg-gray-50">
-        <div class="relative">
+        <!-- Messages Area. flex-grow занимает всё доступное пространство -->
+        <div id="chat-messages" class="flex-grow p-4 space-y-4 overflow-y-auto">
+            <!-- Welcome Message -->
+            <div class="flex space-x-3 message-animate">
+                <div class="flex-shrink-0">
+                    <div class="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center">
+                        <i class="fas fa-university text-blue-900"></i>
+                    </div>
+                </div>
+                <div class="bg-blue-50 rounded-lg p-3 max-w-[80%]">
+                    <p class="text-gray-800">
+                        Здравствуйте! Я виртуальный помощник Газпромбанка. Чем могу помочь Вам сегодня?
+                    </p>
+                    <div class="mt-2 flex flex-wrap gap-2">
+                        {% for button in initial_buttons %}
+                            <button class="suggestion-btn px-3 py-1 bg-white text-orange-700 rounded-full text-sm border border-orange-300 hover:bg-orange-100 transition">
+                                {{ button.text }}
+                            </button>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Input Area. Фиксирована внизу контейнера -->
+        <div class="border-t p-4 bg-gray-50">
+            <div class="relative">
           <textarea
-            id="message-input"
-            rows="1"
-            class="w-full p-3 pr-12 rounded-lg border border-gray-300 focus:border-blue-900 focus:ring-2 focus:ring-blue-200 resize-none transition"
-            placeholder="Введите ваше сообщение..."
+                  id="message-input"
+                  rows="1"
+                  class="w-full p-3 pr-12 rounded-lg border border-gray-300 focus:border-blue-900 focus:ring-2 focus:ring-blue-200 resize-none transition"
+                  placeholder="Введите ваше сообщение..."
           ></textarea>
-          <div class="absolute right-3 bottom-3 flex space-x-2">
-            <button id="send-button" class="w-10 h-10 rounded-full bg-blue-900 text-white flex items-center justify-center hover:bg-orange-500 transition">
-              <i class="fas fa-paper-plane"></i>
-            </button>
-          </div>
+                <div class="absolute right-3 bottom-3 flex space-x-2">
+                    <button id="send-button"
+                            class="w-10 h-10 rounded-full bg-blue-900 text-white flex items-center justify-center hover:bg-orange-500 transition">
+                        <i class="fas fa-paper-plane"></i>
+                    </button>
+                </div>
+            </div>
+            <p class="text-xs text-gray-500 mt-2 text-center">
+                Газпромбанк рекомендует проверять важную информацию через официальный сайт.
+            </p>
         </div>
-        <p class="text-xs text-gray-500 mt-2 text-center">
-          Газпромбанк рекомендует проверять важную информацию через официальный сайт.
-        </p>
-      </div>
     </div>
-  </div>
+</div>
 
-  <script>
-  document.addEventListener("DOMContentLoaded", () => {
-    const input  = document.getElementById("message-input");
-    const btn    = document.getElementById("send-button");
-    const chat   = document.getElementById("chat-messages");
+<script>
+    document.addEventListener("DOMContentLoaded", () => {
+        const input = document.getElementById("message-input");
+        const btn = document.getElementById("send-button");
+        const chat = document.getElementById("chat-messages");
 
-    function addMessage(text, sender, suggestions = null) {
-      const el = document.createElement("div");
-      el.className = `flex space-x-3 message-animate ${sender==='user'?'justify-end':''}`;
-      if (sender === 'user') {
-        el.innerHTML = `
+        function addMessage(text, sender, suggestions = null) {
+            const el = document.createElement("div");
+            el.className = `flex space-x-3 message-animate ${sender === 'user' ? 'justify-end' : ''}`;
+            if (sender === 'user') {
+                el.innerHTML = `
           <div class="bg-blue-900 text-white rounded-lg p-3 max-w-[80%]">
-            <p>${text}</p>
+            <div class="prose prose-sm max-w-none">${marked.parse(text)}</div>
           </div>
           <div class="flex-shrink-0">
             <div class="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center">
               <i class="fas fa-user text-gray-600"></i>
             </div>
           </div>`;
-      } else {
-        let suggestionsHtml = '';
-        if (suggestions && suggestions.length > 0) {
-          suggestionsHtml = `
+            } else {
+                let suggestionsHtml = '';
+                if (suggestions && suggestions.length > 0) {
+                    suggestionsHtml = `
             <div class="mt-2 flex flex-wrap gap-2">
               ${suggestions.map(s => `
                 <button class="suggestion-btn px-3 py-1 bg-white text-orange-700 rounded-full text-sm border border-orange-300 hover:bg-orange-100 transition">
@@ -165,9 +171,9 @@
                 </button>
               `).join('')}
             </div>`;
-        }
-        
-        el.innerHTML = `
+                }
+
+                el.innerHTML = `
           <div class="flex-shrink-0">
             <div class="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center">
               <i class="fas fa-university text-blue-900"></i>
@@ -177,27 +183,27 @@
             <p class="text-gray-800">${text}</p>
             ${suggestionsHtml}
           </div>`;
-      }
-      chat.appendChild(el);
-      chat.scrollTop = chat.scrollHeight;
-      
-      // Добавляем обработчики для новых кнопок
-      if (suggestions) {
-        el.querySelectorAll(".suggestion-btn").forEach(b => {
-          b.addEventListener("click", () => {
-            input.value = b.textContent.trim();
-            input.focus();
-          });
-        });
-      }
-    }
+            }
+            chat.appendChild(el);
+            chat.scrollTop = chat.scrollHeight;
 
-    function showTypingIndicator() {
-      // создаём контейнер с тремя точками
-      const tip = document.createElement("div");
-      tip.id = "typing-indicator";
-      tip.className = "flex space-x-3 message-animate";
-      tip.innerHTML = `
+            // Добавляем обработчики для новых кнопок
+            if (suggestions) {
+                el.querySelectorAll(".suggestion-btn").forEach(b => {
+                    b.addEventListener("click", () => {
+                        input.value = b.textContent.trim();
+                        input.focus();
+                    });
+                });
+            }
+        }
+
+        function showTypingIndicator() {
+            // создаём контейнер с тремя точками
+            const tip = document.createElement("div");
+            tip.id = "typing-indicator";
+            tip.className = "flex space-x-3 message-animate";
+            tip.innerHTML = `
         <div class="flex-shrink-0">
           <div class="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center">
             <i class="fas fa-university text-blue-900"></i>
@@ -208,54 +214,54 @@
             <span></span><span></span><span></span>
           </div>
         </div>`;
-      chat.appendChild(tip);
-      chat.scrollTop = chat.scrollHeight;
-    }
+            chat.appendChild(tip);
+            chat.scrollTop = chat.scrollHeight;
+        }
 
-    function removeTypingIndicator() {
-      const existing = document.getElementById("typing-indicator");
-      if (existing) existing.remove();
-    }
+        function removeTypingIndicator() {
+            const existing = document.getElementById("typing-indicator");
+            if (existing) existing.remove();
+        }
 
-    async function sendMessage() {
-      const text = input.value.trim();
-      if (!text) return;
-      addMessage(text, 'user');
-      input.value = '';
-      input.style.height = 'auto';
-      showTypingIndicator();
+        async function sendMessage() {
+            const text = input.value.trim();
+            if (!text) return;
+            addMessage(text, 'user');
+            input.value = '';
+            input.style.height = 'auto';
+            showTypingIndicator();
 
-      try {
-        const res = await fetch("/api/chat/", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ message: text }),
+            try {
+                const res = await fetch("/api/chat/", {
+                    method: "POST",
+                    headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify({message: text}),
+                });
+                const {message, suggestions} = await res.json();
+                removeTypingIndicator();
+                addMessage(message, 'ai', suggestions);
+            } catch (e) {
+                removeTypingIndicator();
+                addMessage("Ошибка сервера, попробуйте позже.", 'ai');
+            }
+        }
+
+        btn.addEventListener("click", sendMessage);
+        input.addEventListener("keydown", e => {
+            if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+            }
         });
-        const { message, suggestions } = await res.json();
-        removeTypingIndicator();
-        addMessage(message, 'ai', suggestions);
-      } catch (e) {
-        removeTypingIndicator();
-        addMessage("Ошибка сервера, попробуйте позже.", 'ai');
-      }
-    }
 
-    btn.addEventListener("click", sendMessage);
-    input.addEventListener("keydown", e => {
-      if (e.key === "Enter" && !e.shiftKey) {
-        e.preventDefault();
-        sendMessage();
-      }
+        document.querySelectorAll(".suggestion-btn").forEach(b => {
+            b.addEventListener("click", () => {
+                input.value = b.textContent.trim();
+                input.focus();
+            });
+        });
     });
-
-    document.querySelectorAll(".suggestion-btn").forEach(b => {
-      b.addEventListener("click", () => {
-        input.value = b.textContent.trim();
-        input.focus();
-      });
-    });
-  });
-  </script>
+</script>
 
 </body>
 </html>
