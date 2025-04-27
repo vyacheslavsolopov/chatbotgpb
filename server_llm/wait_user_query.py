@@ -12,7 +12,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 LLM_API_URL = "http://127.0.0.1:8080/completion"
-MAX_TOKENS_TO_GENERATE = 512
+MAX_TOKENS_TO_GENERATE = 1024
 
 
 def query_llm(prompt_text: str) -> str | None:
