@@ -40,8 +40,8 @@ def api_chat(request):
             response_message + "Предложи три вопроса, которые может задать пользователь далее. Ответ строго в формате списка и ничего больше: [\"Вопрос 1\", \"Вопрос 2\", \"Вопрос 3\"]")
 
         try:
-            text_list = wait_for_one_message()[1:-2].split(', ')
-            buttons = [{'text': t.strip()[1:-1]} for t in text_list]
+            text_list = wait_for_one_message()[1:-2].split('", "')
+            buttons = [{'text': t.strip().capitalize()} for t in text_list]
         except Exception as e:
             print(e)
             buttons = []
