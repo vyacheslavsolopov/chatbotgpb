@@ -41,7 +41,7 @@ def api_chat(request):
 
         try:
             text_list = wait_for_one_message()[1:-2].split(', ')
-            buttons = [{'text': t.strip()[1:-2]} for t in text_list]
+            buttons = [{'text': t.strip()[1:-1]} for t in text_list]
         except Exception as e:
             print(e)
             buttons = []
