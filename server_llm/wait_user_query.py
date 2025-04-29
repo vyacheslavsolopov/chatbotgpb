@@ -92,7 +92,7 @@ def send_to_queue(user_query):
 
 def callback(ch, method, properties, body):
     try:
-        llm_response = ""  # query_llm(body.decode('utf-8'))
+        llm_response = query_llm(body.decode('utf-8'))
         send_to_queue(llm_response)
         ch.basic_ack(delivery_tag=method.delivery_tag)
     except Exception as e:

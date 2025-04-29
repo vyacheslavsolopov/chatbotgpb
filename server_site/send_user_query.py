@@ -51,5 +51,5 @@ def wait_for_one_message():
 
 
 if __name__ == '__main__':
-    # print(send_to_queue('Привет! Как дела у Саши?'))
+    print(send_to_queue('Привет! Как дела у Саши?'))
     print(wait_for_one_message())
