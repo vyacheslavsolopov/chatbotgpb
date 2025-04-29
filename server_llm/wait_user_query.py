@@ -11,8 +11,22 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-LLM_API_URL = "http://127.0.0.1:8080/completion"
+LLM_API_URL = "http://127.0.0.1:8080/generate"
 MAX_TOKENS_TO_GENERATE = 1024
+
+connection = pika.BlockingConnection(
+    pika.ConnectionParameters(host='195.161.62.198',
+                              port=5672,
+                              virtual_host='/',
+                              credentials=pika.PlainCredentials('guest', 'guest'),
+                              connection_attempts=5,
+                              retry_delay=5,
+                              socket_timeout=10
+                              ))
+channel_from_user = connection.channel()
+channel_from_user.queue_declare(queue='from_user_fixed', durable=True)
+channel_to_user = connection.channel()
+channel_to_user.queue_declare(queue='to_user_fixed', durable=True)
 
 
 def query_llm(prompt_text: str) -> str | None:
@@ -24,7 +38,7 @@ def query_llm(prompt_text: str) -> str | None:
     headers = {"Content-Type": "application/json"}
     data = {
         "prompt": formatted_prompt,
-        "n_predict": MAX_TOKENS_TO_GENERATE,
+        "max_tokens": MAX_TOKENS_TO_GENERATE,
         # Add other parameters your LLM API might support, e.g.:
         # "temperature": 0.7,
         # "stop": ["<|im_end|>", "user:"]
@@ -47,8 +61,8 @@ def query_llm(prompt_text: str) -> str | None:
         if 'content' in result:
             llm_response = result['content']
             # 2. Or maybe another key like 'text' or 'completion':
-        # elif 'text' in result:
-        #     llm_response = result['text']
+        elif 'text' in result:
+            llm_response = result['text'][0].split("assistant")[1]
         # 2. Or maybe another key like 'text' or 'completion':
         # elif 'text' in result:
         #     llm_response = result['text']
@@ -73,63 +87,28 @@ def query_llm(prompt_text: str) -> str | None:
 
 
 def send_to_queue(user_query):
-    global connection
-    try:
-        connection = pika.BlockingConnection(
-            pika.ConnectionParameters(host='195.161.62.198',
-                                      port=5672,
-                                      virtual_host='/',
-                                      credentials=pika.PlainCredentials('guest', 'guest'),
-                                      connection_attempts=5,
-                                      retry_delay=5,
-                                      socket_timeout=10
-                                      ))
-        channel = connection.channel()
-        print('соединение установлено')
-
-        channel.queue_declare(queue='to_user_fixed', durable=True)
-
-        channel.basic_publish(exchange='', routing_key='to_user_fixed', body=user_query)
-        print("сообщение добавлено в очередь")
-        connection.close()
-    except pika.exceptions.AMQPConnectionError as e:
-        print(f"Ошибка подключения: {e}")
-    except KeyboardInterrupt:
-        print("\n Работа завершена")
-        connection.close()
-    except Exception as e:
-        print(f"Ошибка: {e}")
-        if 'connection' in locals():
-            connection.close()
+    channel_to_user.basic_publish(exchange='', routing_key='to_user_fixed', body=user_query)
 
 
 def callback(ch, method, properties, body):
     try:
-        llm_response = query_llm(body.decode('utf-8'))
+        llm_response = ""  # query_llm(body.decode('utf-8'))
         send_to_queue(llm_response)
+        ch.basic_ack(delivery_tag=method.delivery_tag)
     except Exception as e:
         logger.error(f"Error during LLM query: {e}")
+        ch.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
 
 
 def take_from_queue():
-    global connection
     try:
-        connection = pika.BlockingConnection(
-            pika.ConnectionParameters(host='195.161.62.198',
-                                      port=5672,
-                                      virtual_host='/',
-                                      credentials=pika.PlainCredentials('guest', 'guest'),
-                                      connection_attempts=5,
-                                      retry_delay=5,
-                                      socket_timeout=10
-                                      ))
-        channel = connection.channel()
-        print('соединение установлено')
-
-        channel.queue_declare(queue='from_user')
         print('ожидание сообщений')
-        channel.basic_consume(queue='from_user', on_message_callback=callback, auto_ack=True)
-        channel.start_consuming()
+        channel_from_user.basic_consume(
+            queue='from_user_fixed',
+            on_message_callback=callback,
+            auto_ack=False
+        )
+        channel_from_user.start_consuming()
     except pika.exceptions.AMQPConnectionError as e:
         print(f"Ошибка подключения: {e}")
     except KeyboardInterrupt:
