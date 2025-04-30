@@ -6,19 +6,19 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
 from qdrant.search import get_relevant_chunks
-from server_site.send_user_query import LlmRpcClient
-from .models import SuggestionButton
+from server_site.send_user_query import AsyncLlmRpcClient
 
-llm_client = LlmRpcClient()
+llm_client = AsyncLlmRpcClient()
 
 
 @csrf_exempt
-def index(request):
-    initial_buttons = list(SuggestionButton.objects.filter(context='initial').values('text'))
-    return render(request, 'chat/index.html', {'initial_buttons': initial_buttons})
+async def index(request):
+    return render(request, 'chat/index.html', {'initial_buttons': [
+        {'text': 'Проверить баланс'}, {'text': 'Перевод средств'}
+    ]})
 
 
-def stream_llm_response(user_msg):
+async def stream_llm_response(user_msg):
     try:
         found = get_relevant_chunks(user_msg, top_k=30)
         context_prompt = f"Найдены документы по запросу пользователя: {' '.join(found)}."
@@ -26,7 +26,7 @@ def stream_llm_response(user_msg):
         full_prompt = context_prompt + "\n Пользователь написал: \n" + user_msg + "\n по умолчанию отвечай про газпромбанк, если не указаны конкретные источники, разделяй ответ на блоки, чтобы удобнее читалось, и используй конкретные цифры для описания комиссии и других аспектов."
         complete_response_text = ""
 
-        for i, chunk in enumerate(llm_client.stream(full_prompt, timeout_sec=20)):
+        async for chunk in llm_client.stream(full_prompt, timeout_sec=20):
             complete_response_text = chunk
             yield json.dumps({'type': 'chunk', 'content': chunk}) + '\n'
 
@@ -35,7 +35,8 @@ def stream_llm_response(user_msg):
                           "Вопросы отдай строго в json формате, чтобы сработала команда json.load(). "
                           "[{'question': ''}, {'question': ''}, {'question': ''}].")
 
-        buttons_response = llm_client.call(prompt_buttons).get('llm_response', '')
+        buttons_response = await llm_client.call(prompt_buttons)
+        buttons_response = buttons_response.get('llm_response', '')
         buttons = []
         try:
             cleaned_json = buttons_response.strip().lstrip('```json').rstrip('```').strip()
@@ -54,7 +55,7 @@ def stream_llm_response(user_msg):
 
 @csrf_exempt
 @require_POST
-def api_chat(request):
+async def api_chat(request):
     try:
         data = json.loads(request.body)
         user_msg = data.get('message', '').strip()

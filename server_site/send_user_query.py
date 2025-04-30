@@ -1,306 +1,334 @@
+import asyncio
 import json
-import socket
-import time
+import logging
 import uuid
-import pika
-from pika.exceptions import AMQPConnectionError, StreamLostError, ChannelError
-from collections import deque  # Needed for buffering chunks
+from contextlib import suppress
+
+import aio_pika
+from aio_pika.exceptions import AMQPConnectionError, ChannelClosed, ConnectionClosed
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+log = logging.getLogger(__name__)
 
 RABBITMQ_HOST = '195.161.62.198'
 TASK_QUEUE_NAME = 'llm_task_queue'
-DEFAULT_TIMEOUT = 60  # Increased timeout for potentially long streams
+DEFAULT_TIMEOUT = 60
 HEARTBEAT_INTERVAL = 60
 
-# Constants for message types (shared between client and worker)
+# Constants for message types
 MSG_TYPE_CHUNK = "chunk"
 MSG_TYPE_END = "end"
-MSG_TYPE_ERROR = "error"  # Optional: For worker-side errors during streaming
+MSG_TYPE_ERROR = "error"
 
-# Special marker for the buffer to indicate end or error
+# Special markers for the async queue
 STREAM_END_MARKER = object()
 STREAM_ERROR_MARKER = object()
 
 
-class LlmRpcClient:
-    def __init__(self):
+class AsyncLlmRpcClient:
+    def __init__(self, loop: asyncio.AbstractEventLoop = None):
+        self.loop = asyncio.get_running_loop()
         self.connection = None
         self.channel = None
         self.callback_queue = None
-        self._response_holder = {}  # Holds single responses for call()
-        self._stream_buffers = {}  # Holds deque buffers for stream() keyed by corr_id
-        self._connect()
+        self._consumer_task = None
+        self._response_futures = {}  # Holds asyncio.Future for call() responses
+        self._stream_queues = {}  # Holds asyncio.Queue for stream() responses
+        self._connection_lock = asyncio.Lock()  # Prevent concurrent connection attempts
 
-    def _connect(self):
-        self._safe_close()
-        print(" [*] Попытка подключения к RabbitMQ...")
-        try:
-            # Add socket_timeout to handle potential network hangs during connection
-            self.connection = pika.BlockingConnection(
-                pika.ConnectionParameters(
+    async def _connect(self):
+        """Establishes connection, channel, callback queue, and starts consumer."""
+        async with self._connection_lock:  # Ensure only one connection attempt at a time
+            if self.is_connected():
+                log.info(" [*] Already connected.")
+                return True
+
+            log.info(" [*] Attempting to close existing resources before connecting...")
+            await self._safe_close()  # Ensure clean state
+
+            log.info(" [*] Attempting to connect to RabbitMQ at %s...", RABBITMQ_HOST)
+            try:
+                # connect_robust handles reconnection attempts automatically
+                self.connection = await aio_pika.connect_robust(
                     host=RABBITMQ_HOST,
                     heartbeat=HEARTBEAT_INTERVAL,
-                    blocked_connection_timeout=30,  # Timeout for connection blocks
-                    # socket_timeout=10 # Timeout for socket operations
+                    timeout=15,  # Connection attempt timeout
+                    loop=self.loop
                 )
-            )
-            self.channel = self.connection.channel()
+                self.connection.close_callbacks.add(self._handle_connection_close)
+                self.connection.reconnect_callbacks.add(self._handle_reconnect)
 
-            # Increase consumer timeout (experimental, might not be needed with explicit checks)
-            # self.channel.set_consumer_timeout(DEFAULT_TIMEOUT + 10) # Doesn't exist in pika
+                self.channel = await self.connection.channel()
+                self.channel.close_callbacks.add(self._handle_channel_close)
+                log.info(" [*] Channel opened.")
 
-            result = self.channel.queue_declare(queue='', exclusive=True, auto_delete=True)
-            self.callback_queue = result.method.queue
-            print(f" [*] Callback queue создана: {self.callback_queue}")
+                # Declare exclusive callback queue
+                self.callback_queue = await self.channel.declare_queue(
+                    exclusive=True, auto_delete=True
+                )
+                log.info(f" [*] Callback queue declared: {self.callback_queue.name}")
 
-            self.channel.basic_consume(
-                queue=self.callback_queue,
-                on_message_callback=self.on_response,
-                auto_ack=True  # Keep auto_ack for simplicity, but manual ack is safer
-            )
-            print(" [*] Подключение и настройка завершены.")
-            return True
+                # Start the consumer task to listen on the callback queue
+                self._consumer_task = self.loop.create_task(self._consume_responses())
+                log.info(" [*] Connection and setup successful. Consumer task started.")
+                return True
 
-        except AMQPConnectionError as e:
-            print(f" [!] Не удалось подключиться к RabbitMQ: {e}")
-            self._safe_close()
-            return False
-        except socket.timeout:
-            print(f" [!] Таймаут сокета при подключении к RabbitMQ.")
-            self._safe_close()
-            return False
-        except Exception as e:
-            print(f" [!] Неожиданная ошибка при подключении: {e}")
-            self._safe_close()
-            return False
-
-    def _safe_close(self):
-        """Безопасно закрывает канал и соединение."""
-        # Clear buffers on close
-        self._response_holder.clear()
-        # Signal any waiting streams that connection is lost? Difficult in sync code.
-        self._stream_buffers.clear()
-        try:
-            if self.channel and self.channel.is_open:
-                print(" [*] Закрытие канала...")
-                self.channel.close()
-                print(" [*] Канал закрыт.")
-        except Exception as e:
-            print(f" [!] Ошибка при закрытии канала: {e}")
-        try:
-            if self.connection and self.connection.is_open:
-                print(" [*] Закрытие соединения...")
-                self.connection.close()
-                print(" [*] Соединение закрыто.")
-        except Exception as e:
-            print(f" [!] Ошибка при закрытии соединения: {e}")
-        finally:
-            self.channel = None
-            self.connection = None
-            self.callback_queue = None
-
-    def on_response(self, ch, method, props, body):
-        """Handles incoming messages for both call() and stream()."""
-        corr_id = props.correlation_id
-        if not corr_id:
-            print(f" [!] Получен ответ без correlation_id. Игнорируется. Body: {body[:100]}")
-            return
-
-        # Check if this correlation ID is waiting for a stream
-        if corr_id in self._stream_buffers:
-            buffer = self._stream_buffers[corr_id]
-            try:
-                message_data = json.loads(body)
-                msg_type = message_data.get("type")
-                content = message_data.get("content")
-
-                if msg_type == MSG_TYPE_CHUNK:
-                    # print(f" [.] Stream chunk received for {corr_id}") # Debug
-                    if content is not None:
-                        buffer.append(content)
-                    else:
-                        print(f" [!] Stream chunk for {corr_id} has null content.")
-                elif msg_type == MSG_TYPE_END:
-                    print(f" [.] Stream end marker received for {corr_id}")
-                    buffer.append(STREAM_END_MARKER)
-                elif msg_type == MSG_TYPE_ERROR:
-                    print(f" [!] Stream error message received for {corr_id}: {content}")
-                    buffer.append(STREAM_ERROR_MARKER)
-                    buffer.append(content)  # Append error content after marker
-                else:
-                    print(f" [!] Неизвестный тип сообщения в потоке для {corr_id}: {msg_type}. Body: {body[:100]}")
-                    # Treat as error? Or ignore? Let's signal error.
-                    buffer.append(STREAM_ERROR_MARKER)
-                    buffer.append(f"Unknown stream message type: {msg_type}")
-
-            except json.JSONDecodeError:
-                print(f" [!] Ошибка декодирования JSON в потоковом ответе для {corr_id}: {body[:100]}")
-                buffer = self._stream_buffers.get(corr_id)
-                if buffer is not None:
-                    buffer.append(STREAM_ERROR_MARKER)
-                    buffer.append(f"Invalid JSON received in stream: {body.decode('utf-8', errors='ignore')}")
-            except Exception as e:
-                print(f" [!] Неожиданная ошибка в on_response (stream) для {corr_id}: {e}")
-                buffer = self._stream_buffers.get(corr_id)
-                if buffer is not None:
-                    buffer.append(STREAM_ERROR_MARKER)
-                    buffer.append(f"Client-side error processing stream message: {e}")
-
-        # Check if this correlation ID is waiting for a single response (call)
-        elif corr_id in self._response_holder:
-            print(f" [.] Получен ответ (call) для {corr_id}")
-            try:
-                self._response_holder[corr_id] = json.loads(body)
-            except json.JSONDecodeError:
-                print(f" [!] Ошибка декодирования JSON ответа (call) для {corr_id}: {body[:100]}")
-                self._response_holder[corr_id] = {"error": "Invalid JSON response from LLM worker",
-                                                  "raw": body.decode('utf-8', errors='ignore')}
-            except Exception as e:
-                print(f" [!] Неожиданная ошибка в on_response (call) для {corr_id}: {e}")
-                self._response_holder[corr_id] = {"error": f"Client-side error processing call response: {e}"}
-        else:
-            # This can happen if response arrives after timeout or client reset
-            print(f" [!] Получен ответ для неизвестного или устаревшего correlation_id: {corr_id}. Игнорируется.")
-
-    def _publish_message(self, corr_id, request_body):
-        """Internal helper to publish message with reconnection logic."""
-        try:
-            self.channel.basic_publish(
-                exchange='',
-                routing_key=TASK_QUEUE_NAME,
-                properties=pika.BasicProperties(
-                    reply_to=self.callback_queue,
-                    correlation_id=corr_id,
-                    content_type='application/json',
-                    # delivery_mode=2, # Make message persistent (optional)
-                ),
-                body=request_body
-            )
-            return True
-        except (
-                StreamLostError, AMQPConnectionError, ConnectionResetError, socket.error, ChannelError,
-                AttributeError) as e:
-            print(f" [!] Ошибка отправки сообщения (потеря соединения/канала): {e}")
-            print(" [!] Попытка переподключения...")
-            if self._connect():
-                print(" [!] Переподключение успешно. Повторная попытка отправки...")
-                try:
-                    # Need to ensure channel is re-established correctly after _connect
-                    if not self.channel or not self.channel.is_open:
-                        print("[!] Канал не доступен после переподключения.")
-                        return False
-                    self.channel.basic_publish(
-                        exchange='',
-                        routing_key=TASK_QUEUE_NAME,
-                        properties=pika.BasicProperties(
-                            reply_to=self.callback_queue,
-                            correlation_id=corr_id,
-                            content_type='application/json',
-                        ),
-                        body=request_body
-                    )
-                    print(" [x] Повторная отправка успешна.")
-                    return True
-                except Exception as e_retry:
-                    print(f" [!] Ошибка при повторной отправке сообщения: {e_retry}")
-                    self._safe_close()
-                    return False
-            else:
-                print(" [!] Не удалось переподключиться после ошибки отправки.")
+            except (AMQPConnectionError, asyncio.TimeoutError, OSError) as e:
+                log.error(f" [!] Failed to connect to RabbitMQ: {e}")
+                await self._safe_close()
                 return False
+            except Exception as e:
+                log.exception(f" [!] Unexpected error during connection: {e}")
+                await self._safe_close()
+                return False
+
+    def _handle_connection_close(self, sender, exc=None):
+        log.warning(f" [!] RabbitMQ connection closed. Sender: {sender}, Exception: {exc}")
+        # connect_robust should handle reconnection. Reset state variables.
+        self.connection = None
+        self.channel = None
+        self.callback_queue = None
+        if self._consumer_task and not self._consumer_task.done():
+            self._consumer_task.cancel()
+        self._fail_pending_requests("Connection closed")
+
+    def _handle_channel_close(self, sender, exc=None):
+        log.warning(f" [!] RabbitMQ channel closed. Sender: {sender}, Exception: {exc}")
+        # Assume connection is likely still open, channel might reopen on next use
+        self.channel = None
+        # Do not cancel consumer task here, connection might restore channel
+
+    def _handle_reconnect(self, sender):
+        log.info(f" [!] RabbitMQ connection re-established by connect_robust. Sender: {sender}")
+        # Reset channel/queue, consumer needs restart
+        self.channel = None
+        self.callback_queue = None
+        if self._consumer_task and not self._consumer_task.done():
+            self._consumer_task.cancel()
+            self._consumer_task = None
+        # Don't auto-connect here, let next operation trigger it via _ensure_connection
+
+    def _fail_pending_requests(self, reason):
+        """Fail any pending futures or queues due to connection loss."""
+        log.warning(f"Failing pending requests due to: {reason}")
+        exception = ConnectionError(reason)
+        for future in self._response_futures.values():
+            if not future.done():
+                future.set_exception(exception)
+        for queue in self._stream_queues.values():
+            # Putting exception might be better than just clearing
+            try:
+                queue.put_nowait(STREAM_ERROR_MARKER)
+                queue.put_nowait(reason)
+            except asyncio.QueueFull:
+                log.error("Could not signal stream queue about connection error - queue full.")
+
+        self._response_futures.clear()
+        self._stream_queues.clear()
+
+    async def _consume_responses(self):
+        """Background task to consume messages from the callback queue."""
+        if not self.callback_queue:
+            log.error("[!] Consumer task started without a callback queue.")
+            return  # Should not happen if _connect logic is sound
+
+        log.info(f" [*] Consumer task starting for queue: {self.callback_queue.name}")
+        try:
+            async for message in self.callback_queue:  # type: aio_pika.IncomingMessage
+                async with message.process(ignore_processed=True):  # Auto-ack within context
+                    corr_id = message.correlation_id
+                    if not corr_id:
+                        log.warning(f" [!] Received message without correlation_id. Body: {message.body[:100]}")
+                        continue
+
+                    # --- Handle Stream Message ---
+                    if corr_id in self._stream_queues:
+                        stream_queue = self._stream_queues[corr_id]
+                        try:
+                            data = json.loads(message.body)
+                            msg_type = data.get("type")
+                            content = data.get("content")
+
+                            if msg_type == MSG_TYPE_CHUNK:
+                                if content is not None:
+                                    await stream_queue.put(content)
+                                else:
+                                    log.warning(f" [!] Stream chunk for {corr_id} has null content.")
+                            elif msg_type == MSG_TYPE_END:
+                                log.info(f" [.] Stream end marker received for {corr_id}")
+                                await stream_queue.put(STREAM_END_MARKER)
+                            elif msg_type == MSG_TYPE_ERROR:
+                                log.error(f" [!] Stream error message received for {corr_id}: {content}")
+                                await stream_queue.put(STREAM_ERROR_MARKER)
+                                await stream_queue.put(content or "Unknown worker error")
+                            else:
+                                log.warning(f" [!] Unknown stream message type for {corr_id}: {msg_type}")
+                                await stream_queue.put(STREAM_ERROR_MARKER)
+                                await stream_queue.put(f"Unknown stream message type: {msg_type}")
+
+                        except json.JSONDecodeError:
+                            log.error(f" [!] JSON decode error for stream {corr_id}: {message.body[:100]}")
+                            await stream_queue.put(STREAM_ERROR_MARKER)
+                            await stream_queue.put(f"Invalid JSON in stream: {message.body.decode(errors='ignore')}")
+                        except Exception as e:
+                            log.exception(f" [!] Error processing stream message for {corr_id}: {e}")
+                            with suppress(asyncio.QueueFull):  # Avoid error if queue is full/closed
+                                await stream_queue.put(STREAM_ERROR_MARKER)
+                                await stream_queue.put(f"Client error processing stream: {e}")
+
+                    # --- Handle Call Message ---
+                    elif corr_id in self._response_futures:
+                        future = self._response_futures.get(corr_id)
+                        if future and not future.done():
+                            try:
+                                response_data = json.loads(message.body)
+                                future.set_result(response_data)
+                            except json.JSONDecodeError:
+                                log.error(f" [!] JSON decode error for call {corr_id}: {message.body[:100]}")
+                                future.set_exception(
+                                    ValueError(f"Invalid JSON response: {message.body.decode(errors='ignore')}"))
+                            except Exception as e:
+                                log.exception(f" [!] Error processing call response for {corr_id}: {e}")
+                                future.set_exception(e)
+                        else:
+                            # Future might have timed out or already processed
+                            log.warning(f" [!] Received response for completed or unknown future {corr_id}.")
+
+                    else:
+                        log.warning(f" [!] Received response for unknown correlation_id: {corr_id}. Ignored.")
+
+        except asyncio.CancelledError:
+            log.info(" [*] Consumer task cancelled.")
+        except (ChannelClosed, ConnectionClosed) as e:
+            log.warning(f"[!] Consumer task stopped due to closed channel/connection: {e}")
         except Exception as e:
-            print(f" [!] Неожиданная ошибка отправки сообщения: {e}")
-            self._safe_close()  # Close connection on unexpected errors
+            log.exception(f" [!] Consumer task crashed: {e}")
+        finally:
+            log.info(" [*] Consumer task finished.")
+            # Ensure connection close callback handles cleanup if this task stops unexpectedly
+
+    async def _ensure_connection(self):
+        """Checks connection and attempts to connect if necessary."""
+        if not self.is_connected():
+            log.info("Connection not active. Attempting to connect...")
+            if not await self._connect():
+                raise ConnectionError("Failed to establish RabbitMQ connection.")
+        elif not self.channel or self.channel.is_closed:
+            log.warning("Channel is closed or None, attempting to recreate...")
+            try:
+                self.channel = await self.connection.channel()
+                self.channel.add_close_callback(self._handle_channel_close)
+                log.info("Channel recreated successfully.")
+                # Re-declare queue and restart consumer IF channel closure caused queue loss
+                if not self.callback_queue or self.callback_queue.name is None:
+                    log.warning("Callback queue seems lost, re-declaring...")
+                    self.callback_queue = await self.channel.declare_queue(exclusive=True, auto_delete=True)
+                    if self._consumer_task and not self._consumer_task.done():
+                        self._consumer_task.cancel()  # Cancel old one if any
+                    self._consumer_task = self.loop.create_task(self._consume_responses())
+                    log.info(f"Callback queue re-declared ({self.callback_queue.name}), consumer restarted.")
+
+            except Exception as e:
+                log.exception(f"Failed to recreate channel: {e}")
+                await self._safe_close()  # Major issue, reset connection state
+                raise ConnectionError(f"Failed to recreate RabbitMQ channel: {e}") from e
+
+    def is_connected(self):
+        """Check if connection and channel appear active."""
+        return (
+                self.connection is not None and not self.connection.is_closed and
+                self.channel is not None and not self.channel.is_closed and
+                self.callback_queue is not None and self.callback_queue.name is not None and  # Check queue name exists
+                self._consumer_task is not None and not self._consumer_task.done()  # Check consumer is running
+        )
+
+    async def _publish_message(self, corr_id, request_body, reply_to_queue):
+        """Publishes a message to the task queue."""
+        await self._ensure_connection()  # Make sure connection is ready
+
+        message = aio_pika.Message(
+            body=request_body.encode(),
+            correlation_id=corr_id,
+            reply_to=reply_to_queue,
+            content_type='application/json',
+            delivery_mode=aio_pika.DeliveryMode.PERSISTENT  # Optional: make durable
+        )
+        try:
+            # Use default exchange for routing via routing_key (queue name)
+            await self.channel.default_exchange.publish(
+                message,
+                routing_key=TASK_QUEUE_NAME
+            )
+            log.info(f" [x] Message published (CorrID: {corr_id})")
+            return True
+        except (ChannelClosed, ConnectionClosed) as e:
+            log.error(f" [!] Failed to publish message due to closed channel/connection: {e}")
+            # Don't raise here, let _ensure_connection handle reconnect on next call
+            # But signal failure for this specific publish attempt
+            return False
+        except Exception as e:
+            log.exception(f" [!] Unexpected error publishing message (CorrID: {corr_id}): {e}")
+            # Consider closing connection on severe errors
+            # await self._safe_close()
             return False
 
-    # --- Original call method (slightly modified response handling) ---
-    def call(self, user_message, user_id="default_user", timeout_sec=DEFAULT_TIMEOUT):
-        if not self.connection or self.connection.is_closed or \
-                not self.channel or self.channel.is_closed:
-            print(" [!] Соединение/канал потеряны перед отправкой (call), пытаемся переподключиться...")
-            if not self._connect():
-                print(" [!] Не удалось переподключиться перед отправкой (call).")
-                return {"error": "Failed to connect to message queue"}
-
+    async def call(self, user_message, user_id="default_user", timeout_sec=DEFAULT_TIMEOUT):
+        """Sends a request and waits for a single JSON response."""
+        await self._ensure_connection()
         corr_id = str(uuid.uuid4())
-        # Put a placeholder to indicate we are waiting for this ID
-        self._response_holder[corr_id] = None
+        future = self.loop.create_future()
+        self._response_futures[corr_id] = future
 
         request_body = json.dumps({
             'user_id': user_id,
             'message': user_message,
-            # 'stream': False # Explicitly indicate non-streaming if needed by worker
+            # 'stream': False # Optional indicator
         })
 
-        print(f" [x] Отправка запроса (call) '{user_message[:30]}...' (ID: {corr_id})")
-        if not self._publish_message(corr_id, request_body):
-            del self._response_holder[corr_id]  # Clean up placeholder
+        log.info(f" [x] Sending request (call) '{user_message[:30]}...' (ID: {corr_id})")
+        published = await self._publish_message(corr_id, request_body, self.callback_queue.name)
+
+        if not published:
+            if corr_id in self._response_futures: del self._response_futures[corr_id]
+            future.cancel()  # Ensure future is cancelled
             return {"error": "Failed to publish message (call)"}
 
-        print(f" [.] Ожидание ответа (call) для {corr_id}...")
-        start_time = time.time()
-        response = None
-        while response is None:
-            try:
-                # Process events for a short time, then check buffer/timeout
-                self.connection.process_data_events(time_limit=0.1)  # Non-blocking check
-                response = self._response_holder.get(corr_id)  # Check if response arrived
+        try:
+            log.info(f" [.] Waiting for response (call) for {corr_id} (Timeout: {timeout_sec}s)")
+            result = await asyncio.wait_for(future, timeout=timeout_sec)
+            log.info(f" [.] Response received for {corr_id}")
+            return result
+        except asyncio.TimeoutError:
+            log.error(f" [!] Timeout waiting for response (call) for {corr_id}")
+            return {"error": f"Timeout waiting for LLM response (call) after {timeout_sec} seconds"}
+        except asyncio.CancelledError:
+            log.warning(f" [!] Call request {corr_id} was cancelled.")
+            return {"error": "Call request cancelled"}
+        except Exception as e:
+            log.exception(f" [!] Error waiting for future {corr_id}: {e}")
+            return {"error": f"Error waiting for response: {e}"}
+        finally:
+            # Always remove the future when done
+            if corr_id in self._response_futures:
+                del self._response_futures[corr_id]
 
-                if response is not None:  # Response received
-                    break
-
-                if time.time() - start_time > timeout_sec:
-                    print(f" [!] Таймаут ожидания ответа (call) для {corr_id}")
-                    response = {"error": f"Timeout waiting for LLM response (call) after {timeout_sec} seconds"}
-                    break
-
-                # Add a small sleep to prevent busy-waiting if process_data_events returns immediately
-                # time.sleep(0.05)
-
-            except (StreamLostError, AMQPConnectionError, ConnectionResetError, socket.error, ChannelError) as e:
-                print(f" [!] Ошибка во время ожидания ответа (call) (потеря соединения/канала): {e}")
-                response = {"error": f"Connection lost while waiting for call response: {e}. Please retry."}
-                self._safe_close()  # Attempt to close cleanly
-                break  # Exit loop on connection error
-            except Exception as e:
-                print(f" [!] Неожиданная ошибка во время ожидания ответа (call): {e}")
-                response = {"error": f"Unexpected error while waiting for call response: {e}"}
-                self._safe_close()
-                break  # Exit loop on unexpected error
-
-        # Clean up the holder for this correlation ID
-        if corr_id in self._response_holder:
-            del self._response_holder[corr_id]
-
-        # Attempt reconnection if connection was lost during wait
-        if "Connection lost" in response.get("error", "") and (not self.connection or self.connection.is_closed):
-            print(" [!] Попытка переподключения после потери соединения во время ожидания (call)...")
-            self._connect()  # Try to reconnect for future calls
-
-        return response
-
-    # --- New stream method ---
-    def stream(self, user_message, user_id="default_user", timeout_sec=DEFAULT_TIMEOUT):
+    async def stream(self, user_message, user_id="default_user", timeout_sec=DEFAULT_TIMEOUT):
         """
-        Sends a request and yields response chunks as they arrive.
+        Sends a request and yields response chunks asynchronously.
 
         Yields:
             str: Chunks of the response content.
 
         Raises:
-            TimeoutError: If the stream times out waiting for the next chunk or end.
+            TimeoutError: If the stream times out waiting for the next chunk.
             ConnectionError: If the connection fails during streaming.
             RuntimeError: If the worker sends an error message or invalid data.
         """
-        if not self.connection or self.connection.is_closed or \
-                not self.channel or self.channel.is_closed:
-            print(" [!] Соединение/канал потеряны перед отправкой (stream), пытаемся переподключиться...")
-            if not self._connect():
-                print(" [!] Не удалось переподключиться перед отправкой (stream).")
-                raise ConnectionError("Failed to connect to message queue before streaming")
-
+        await self._ensure_connection()
         corr_id = str(uuid.uuid4())
-
-        self._stream_buffers[corr_id] = deque()
+        queue = asyncio.Queue()  # Buffer for this stream
+        self._stream_queues[corr_id] = queue
 
         request_body = json.dumps({
             'user_id': user_id,
@@ -308,99 +336,142 @@ class LlmRpcClient:
             'stream': True
         })
 
-        print(f" [x] Отправка запроса (stream) '{user_message[:30]}...' (ID: {corr_id})")
-        if not self._publish_message(corr_id, request_body):
-            del self._stream_buffers[corr_id]  # Clean up buffer
+        log.info(f" [x] Sending request (stream) '{user_message[:30]}...' (ID: {corr_id})")
+        published = await self._publish_message(corr_id, request_body, self.callback_queue.name)
+
+        if not published:
+            if corr_id in self._stream_queues: del self._stream_queues[corr_id]
             raise ConnectionError("Failed to publish stream message")
 
-        print(f" [.] Ожидание потока (stream) для {corr_id}...")
-        start_time = time.time()
-        last_data_time = start_time
-        stream_ended = False
-
+        log.info(f" [.] Waiting for stream data for {corr_id} (Inactivity Timeout: {timeout_sec}s)")
         try:
-            while not stream_ended:
-                buffer = self._stream_buffers.get(corr_id)
-                if buffer is None:
-                    # This shouldn't happen if publish was successful, but safety check
-                    raise RuntimeError(f"Stream buffer for {corr_id} disappeared")
-
-                # Process buffered messages first
-                while buffer:
-                    item = buffer.popleft()
-                    last_data_time = time.time()  # Reset timeout timer on receiving data
+            while True:
+                try:
+                    # Wait for the next item from the queue with inactivity timeout
+                    item = await asyncio.wait_for(queue.get(), timeout=timeout_sec)
 
                     if item is STREAM_END_MARKER:
-                        print(f" [.] Stream {corr_id} ended normally.")
-                        stream_ended = True
-                        break  # Exit inner loop (processing buffer)
+                        log.info(f" [.] Stream {corr_id} ended normally.")
+                        break  # Exit the loop gracefully
                     elif item is STREAM_ERROR_MARKER:
                         error_content = "Unknown stream error"
-                        if buffer:  # Error content should be next item
-                            error_content = buffer.popleft()
-                        print(f" [!] Stream {corr_id} ended with error: {error_content}")
-                        stream_ended = True
+                        try:
+                            # Error content should be the next item, get it quickly
+                            error_content = await asyncio.wait_for(queue.get(), timeout=1)
+                            queue.task_done()  # Mark error content retrieval done
+                        except asyncio.TimeoutError:
+                            log.warning(f"Timeout getting error content for stream {corr_id}")
+                        except asyncio.QueueEmpty:
+                            log.warning(f"No error content found in queue for stream {corr_id} after marker")
+                        log.error(f" [!] Stream {corr_id} ended with error: {error_content}")
                         raise RuntimeError(f"Stream error from worker or processing: {error_content}")
                     else:
-                        # print(f" [.] Yielding chunk for {corr_id}") # Debug
-                        yield item  # Yield the actual content chunk
+                        # It's a regular chunk
+                        # log.debug(f" [.] Yielding chunk for {corr_id}")
+                        yield item
+                        queue.task_done()  # Mark chunk processing done
 
-                if stream_ended:
-                    break  # Exit outer loop (waiting for events)
-
-                # If buffer is empty, wait for new messages
-                try:
-                    # Process events for a short time, then check buffer/timeout
-                    # Use a small time_limit to be responsive
-                    self.connection.process_data_events(time_limit=0.1)
-                except (StreamLostError, AMQPConnectionError, ConnectionResetError, socket.error, ChannelError) as e:
-                    print(f" [!] Ошибка во время ожидания потока (stream) (потеря соединения/канала): {e}")
-                    self._safe_close()  # Attempt to close cleanly
-                    raise ConnectionError(f"Connection lost while waiting for stream data: {e}") from e
-                except Exception as e:
-                    print(f" [!] Неожиданная ошибка во время ожидания потока (stream): {e}")
-                    self._safe_close()
-                    raise RuntimeError(f"Unexpected error while waiting for stream data: {e}") from e
-
-                # Check for overall timeout or inactivity timeout
-                current_time = time.time()
-                # Timeout if overall time exceeds limit OR if no data received for timeout_sec period
-                if current_time - start_time > timeout_sec * 1.5:  # Overall longer timeout for stream
-                    print(f" [!] Общий таймаут потока (stream) для {corr_id}")
-                    raise TimeoutError(f"Stream timed out after {timeout_sec * 1.5} seconds (overall)")
-                if current_time - last_data_time > timeout_sec:
-                    print(f" [!] Таймаут неактивности потока (stream) для {corr_id}")
+                except asyncio.TimeoutError:
+                    log.error(f" [!] Stream {corr_id} timed out due to inactivity after {timeout_sec} seconds.")
                     raise TimeoutError(f"Stream timed out due to inactivity after {timeout_sec} seconds")
-
-                # Optional: small sleep if process_data_events is non-blocking and buffer was empty
-                # time.sleep(0.01)
+                except asyncio.CancelledError:
+                    log.warning(f" [!] Stream {corr_id} was cancelled during wait.")
+                    raise  # Re-raise cancellation
+                except Exception as e:
+                    log.exception(f"[!] Unexpected error getting item from stream queue {corr_id}: {e}")
+                    raise RuntimeError(f"Internal error processing stream queue: {e}") from e
 
         finally:
-            # Clean up the buffer for this correlation ID when generator exits
-            # (either normally or due to exception)
-            if corr_id in self._stream_buffers:
-                print(f" [.] Очистка буфера для потока {corr_id}")
-                del self._stream_buffers[corr_id]
-            # Try to reconnect if connection was lost
-            if not self.connection or self.connection.is_closed:
-                print(" [!] Попытка переподключения после завершения/ошибки потока...")
-                self._connect()
+            # Clean up the queue for this correlation ID when generator exits
+            if corr_id in self._stream_queues:
+                log.info(f" [.] Cleaning up queue for stream {corr_id}")
+                # Drain queue to prevent tasks getting stuck if consumer adds more
+                while not queue.empty():
+                    with suppress(asyncio.QueueEmpty):
+                        queue.get_nowait()
+                        queue.task_done()
+                del self._stream_queues[corr_id]
 
-    def close(self):
-        print(" [*] Закрытие соединения с RabbitMQ по запросу.")
-        self._safe_close()
+    async def _safe_close(self):
+        """Safely closes consumer task, channel, and connection."""
+        log.info(" [*] Initiating safe close...")
+        if self._consumer_task and not self._consumer_task.done():
+            log.info(" [*] Cancelling consumer task...")
+            self._consumer_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await self._consumer_task
+            log.info(" [*] Consumer task cancelled.")
+            self._consumer_task = None
+
+        if self.channel and not self.channel.is_closed:
+            log.info(" [*] Closing channel...")
+            with suppress(Exception):  # Suppress errors during close
+                await self.channel.close()
+            log.info(" [*] Channel closed.")
+            self.channel = None
+
+        if self.connection and not self.connection.is_closed:
+            log.info(" [*] Closing connection...")
+            with suppress(Exception):
+                await self.connection.close()
+            log.info(" [*] Connection closed.")
+            self.connection = None
+
+        self.callback_queue = None
+        # Fail any requests still pending after trying to close
+        self._fail_pending_requests("Client closed")
+        log.info(" [*] Safe close finished.")
+
+    async def close(self):
+        """Public method to explicitly close the client connection."""
+        log.info(" [*] Closing connection via close() method.")
+        await self._safe_close()
 
 
-# Example Usage (requires a worker that supports streaming)
-if __name__ == "__main__":
-    client = LlmRpcClient()
+# Example Async Usage (requires an async context)
+async def main():
+    client = AsyncLlmRpcClient()
 
-    prompt = "Напиши список из 5 фруктов, каждый на новой строке."
+    # Ensure connection before making calls
+    # await client._connect() # Or let the first call/stream handle it
+
+    # --- Example Call ---
+    print("\n--- Testing Call ---")
+    call_prompt = "What is the capital of France?"
+    response = await client.call(call_prompt, timeout_sec=10)
+    print(f"Call Response: {response}")
+
+    await asyncio.sleep(1)  # Small delay
+
+    # --- Example Stream ---
+    print("\n--- Testing Stream ---")
+    stream_prompt = "List 5 popular dog breeds, one per line."
     full_stream_response = ""
-    for i, chunk in enumerate(client.stream(prompt, timeout_sec=20)):
-        print(f" [.] Получен чанк {i}: '{chunk.strip()}'")
-        full_stream_response = chunk
-    print("\n [.] Полный собранный ответ (stream):")
-    print(full_stream_response)
+    try:
+        async for chunk in client.stream(stream_prompt, timeout_sec=20):  # Increased inactivity timeout
+            print(f"  [.] Stream Chunk: '{chunk.strip()}'")
+            full_stream_response = chunk  # Keep track of the latest full state if needed
+        print("\n [.] Stream finished successfully.")
+        # print("\n [.] Final assembled stream content:") # Only if assembling delta chunks
+        # print(full_stream_response)
+    except TimeoutError as e:
+        print(f" [!] Stream timed out: {e}")
+    except ConnectionError as e:
+        print(f" [!] Stream connection error: {e}")
+    except RuntimeError as e:
+        print(f" [!] Stream runtime error: {e}")
+    except Exception as e:
+        print(f" [!] Unexpected error during stream: {e}")
 
-    client.close()
+    # --- Clean up ---
+    print("\n--- Closing Client ---")
+    await client.close()
+    print("--- Done ---")
+
+
+if __name__ == "__main__":
+    # Run the async main function
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("\nInterrupted by user.")

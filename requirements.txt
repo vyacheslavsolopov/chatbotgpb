@@ -63,3 +63,4 @@ urllib3==2.4.0
 
 pathlib~=1.0.1
 sseclient~=0.0.27
+aio-pika~=9.4.3

@@ -6,19 +6,20 @@ from sentence_transformers import SentenceTransformer
 from qdrant_client import QdrantClient
 
 # ————— НАСТРОЙКИ —————
-QDRANT_HOST     = "195.161.62.198"
-QDRANT_REST_PORT= 6334
+QDRANT_HOST = "195.161.62.198"
+QDRANT_REST_PORT = 6334
 COLLECTION_NAME = "pdf_documents"
-EMBED_MODEL_NAME= "all-MiniLM-L6-v2"
+EMBED_MODEL_NAME = "all-MiniLM-L6-v2"
 # ————————————————————
 
 # инициализация
 embedder = SentenceTransformer(EMBED_MODEL_NAME)
-client   = QdrantClient(
+client = QdrantClient(
     url=f"http://{QDRANT_HOST}:{QDRANT_REST_PORT}",
     prefer_grpc=False,
     timeout=30
 )
+
 
 def get_relevant_chunks(query: str, top_k: int = 5):
     """
@@ -38,8 +39,9 @@ def get_relevant_chunks(query: str, top_k: int = 5):
     results = []
     for hit in hits:
         payload = hit.payload
-        results.append(payload.get("text", ""),)
+        results.append(payload.get("text", ""), )
     return results
+
 
 if __name__ == "__main__":
     q = input("Введите запрос: ")
