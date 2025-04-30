@@ -40,6 +40,7 @@ async def stream_llm_response(user_msg):
         buttons = []
         try:
             cleaned_json = buttons_response.strip().lstrip('```json').rstrip('```').strip()
+            cleaned_json = cleaned_json.strip().lstrip('```json').rstrip('```').strip()
             cleaned_json = cleaned_json.replace("'", '"')
             parsed_buttons = json.loads(cleaned_json)
             buttons = [{'text': item['question'].strip()} for item in parsed_buttons]
