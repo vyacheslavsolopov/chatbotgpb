@@ -41,7 +41,7 @@ def api_chat(request):
         text_list = llm_client.call(prompt_buttons).get('llm_response', '')
 
         try:
-            text_list = text_list.strip('```').strip('json').replace("'", '"')
+            text_list = text_list.strip('```').strip('json').replace("'", '"').strip('```').strip('json')
             print(text_list)
             buttons = [{'text': t['question'].strip().capitalize()} for t in json.loads(text_list)]
         except Exception as e:
