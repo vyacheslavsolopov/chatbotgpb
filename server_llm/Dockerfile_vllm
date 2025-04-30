@@ -1,0 +1,48 @@
+FROM nvidia/cuda:11.8.0-cudnn8-devel-ubuntu22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    cmake \
+    git \
+    wget \
+    curl \
+    libopenblas-dev \
+    libomp-dev \
+    python3-pip \
+    python3.10-dev \
+    libcurl4-openssl-dev \
+    ccache \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /workspace
+
+RUN echo "Checking for CUDA stub library..." && \
+    ls -l /usr/local/cuda/targets/x86_64-linux/lib/stubs/libcuda.so && \
+    echo "CUDA stub library found." || \
+    (echo "ERROR: CUDA stub library not found at expected location!" && exit 1)
+
+EXPOSE 8080
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir vllm
+
+RUN apt-get update && apt-get install -y \
+    git \
+    ninja-build \
+    cmake \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN git clone --recursive https://github.com/flashinfer-ai/flashinfer.git
+
+RUN pip install --upgrade pip setuptools wheel build ninja
+
+WORKDIR /workspace/flashinfer
+RUN python3 -m build --no-isolation --wheel
+
+RUN pip install dist/flashinfer_python-0.2.5-py3-none-any.whl
+
+CMD ["python3", "-m", "vllm.entrypoints.api_server", "--model", "t-tech/T-lite-it-1.0", "--max-model-len", "6000", \
+         "--host", "0.0.0.0", "--port", "8080", "--tensor-parallel-size", "4"]

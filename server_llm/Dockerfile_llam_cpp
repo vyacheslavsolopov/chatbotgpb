@@ -1,0 +1,61 @@
+# Use an official CUDA image as the base
+FROM nvidia/cuda:11.8.0-cudnn8-devel-ubuntu22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install dependencies (adjust based on previous success with CMake version)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    cmake \
+    git \
+    wget \
+    curl \
+    libopenblas-dev \
+    libomp-dev \
+    python3-pip \
+    libcurl4-openssl-dev \
+    ccache \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Optional: Install newer CMake if needed
+# RUN CMAKE_VERSION=3.28.1 && \
+#     wget https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-linux-x86_64.sh && \
+#     chmod +x cmake-${CMAKE_VERSION}-linux-x86_64.sh && \
+#     ./cmake-${CMAKE_VERSION}-linux-x86_64.sh --skip-license --prefix=/usr/local && \
+#     rm cmake-${CMAKE_VERSION}-linux-x86_64.sh
+
+# Set up the working directory
+WORKDIR /workspace
+
+# Clone llama.cpp repo
+RUN git clone https://github.com/ggerganov/llama.cpp.git
+
+# Verify stub library location
+RUN echo "Checking for CUDA stub library..." && \
+    ls -l /usr/local/cuda/targets/x86_64-linux/lib/stubs/libcuda.so && \
+    echo "CUDA stub library found." || \
+    (echo "ERROR: CUDA stub library not found at expected location!" && exit 1)
+
+# Build the project
+WORKDIR /workspace/llama.cpp
+# Add the CUDA stub library path AND explicitly link the cuda library (-lcuda)
+RUN mkdir build && cd build && \
+    cmake .. \
+        -DGGML_CUDA=ON \
+        # Combine the library path and the library link request
+        -DCMAKE_SHARED_LINKER_FLAGS="-L/usr/local/cuda/targets/x86_64-linux/lib/stubs -lcuda" \
+        -DCMAKE_EXE_LINKER_FLAGS="-L/usr/local/cuda/targets/x86_64-linux/lib/stubs -lcuda" \
+        -DCMAKE_CUDA_ARCHITECTURES="75;80;86" && \
+    echo "--- CMake Configuration Complete ---" && \
+    echo "--- Starting Build ---" && \
+    cmake --build . --config Release -j $(nproc)
+
+# Expose the server's port (adjust if needed)
+EXPOSE 8080
+
+# Optional: Add a default command if you intend to run something specific
+# CMD ["./bin/server", "-m", "path/to/your/model.gguf", "-c", "2048"]
+CMD ["./build/bin/llama-server", "--hf-repo", "t-tech/T-lite-it-1.0-Q8_0-GGUF", "--hf-file", "t-lite-it-1.0-q8_0.gguf", \
+         "-c", "4096", "-ngl", "999",  "-b", "4096", "-ub", "4096", "--flash-attn", "--cont-batching", \
+         "--host", "0.0.0.0", "--port", "8080"]
