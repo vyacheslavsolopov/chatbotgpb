@@ -35,12 +35,14 @@ def api_chat(request):
 
         response_message = llm_client.call(prompt).get('llm_response', '')
 
-        prompt_buttons = response_message + "Предложи три вопроса, которые может задать пользователь далее. Ответ строго в формате списка и ничего больше: [\"Вопрос 1\", \"Вопрос 2\", \"Вопрос 3\"]"
+        prompt_buttons = response_message + ("Предложи три вопроса, которые может задать пользователь далее. "
+                                             "Вопросы отдай строго в json формате, чтобы сработала команда json.load(). "
+                                             "[{'question': ''}, {'question': ''}, {'question': ''}].")
         text_list = llm_client.call(prompt_buttons).get('llm_response', '')
 
         try:
-            text_list = text_list[2:-2].split('", "')
-            buttons = [{'text': t.strip().capitalize()} for t in text_list]
+            text_list = text_list.strip('```').strip('json')
+            buttons = [{'text': t['question'].strip().capitalize()} for t in json.loads(text_list)]
         except Exception as e:
             print(e)
             buttons = []
