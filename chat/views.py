@@ -31,7 +31,7 @@ def api_chat(request):
 
         prompt = f"Найдены документы по запросу пользователя: {' '.join(found)}."
         prompt = prompt.replace('\n', ' ')
-        prompt = prompt + "\n Пользователь написал: \n" + user_msg
+        prompt = prompt + "\n Пользователь написал: \n" + user_msg + "\n по умолчанию отвечай про газпромбанк, если не указаны конкретные источники, разделяй ответ на блоки, чтобы удобнее читалось, и используй конкретные цифры для описания комиссии и других аспектов."
 
         response_message = llm_client.call(prompt).get('llm_response', '')
 
