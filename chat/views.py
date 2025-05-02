@@ -1,23 +1,20 @@
-import asyncio
 import json
 import os
 import io
 import uuid
 
 from django.shortcuts import render, redirect
-from django.http import StreamingHttpResponse, JsonResponse  # Изменено
+from django.http import StreamingHttpResponse, JsonResponse
 from django.urls import reverse
-# from django.urls import reverse
-from django.views.decorators.csrf import csrf_exempt, csrf_protect
+from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST, require_GET
 
-from .qdrant.search import get_relevant_chunks
+from .qdrant.search import get_relevant_chunks, encode_async_embeddings
 from .server_site.send_user_query import AsyncLlmRpcClient
 from .qdrant.parsing import (
     extract_text_from_pdf,
     extract_text_from_docx,
     chunk_text,
-    get_embeddings,
     client as qdrant_client,
     COLLECTION_NAME,
     BATCH_SIZE,
@@ -26,19 +23,12 @@ from .qdrant.parsing import (
 llm_client = AsyncLlmRpcClient()
 
 
-# try:
-#     print(reverse('chat:index'))
-#     print(reverse('chat:handle_upload'))
-# except Exception as e:
-#     print(f"Error reversing URL: {e}")
-
-
 @csrf_exempt
 async def index(request):
     initial_buttons = [
-        {"text": "Как открыть счет?"},
-        {"text": "Какие документы нужны для кредита?"},
-        {"text": "Расскажи о вкладах"},
+        {"text": "Какие условия международных переводов?"},
+        {"text": "Какие условия переводов внутри страны?"},
+        {"text": "Расскажи о преимуществах Газпромбанка"},
     ]
     return render(request, 'chat/index.html', {'initial_buttons': initial_buttons})
 
@@ -67,6 +57,7 @@ async def stream_llm_response(user_msg):
             cleaned_json = buttons_response.strip().lstrip('```json').rstrip('```').strip()
             cleaned_json = cleaned_json.strip().lstrip('```json').rstrip('```').strip()
             cleaned_json = cleaned_json.replace("'", '"')
+            cleaned_json = cleaned_json.replace('```', '').replace('json', '')
             print(cleaned_json)
             parsed_buttons = json.loads(cleaned_json)
             buttons = [{'text': item['question'].strip()} for item in parsed_buttons]
@@ -82,15 +73,12 @@ async def stream_llm_response(user_msg):
 
 @require_GET
 def upload_page(request):
-    return render(request, 'chat/upload.html',
-                  {
-                      'upload_submit_url': 'http://127.0.0.1:8000/submit/'
-                  })
+    return render(request, 'chat/upload.html')
 
 
 @require_POST
 @csrf_exempt
-def handle_upload(request):
+async def handle_upload(request):
     uploaded = request.FILES.get('file-upload')
     if not uploaded:
         return JsonResponse({'error': 'Файл не был загружен.'}, status=400)
@@ -102,21 +90,18 @@ def handle_upload(request):
     if uploaded.size > 100 * 1024 * 1024:
         return JsonResponse({'error': 'Размер файла превышает 100 MB.'}, status=400)
 
-    # Читаем весь файл в память
     data = uploaded.read()
-    # Извлекаем текст
+
     if ext == '.pdf':
         text = extract_text_from_pdf(io.BytesIO(data))
     elif ext == '.docx':
         text = extract_text_from_docx(io.BytesIO(data))
-    else:  # .txt
+    else:
         text = data.decode(errors='ignore')
 
-    # Чанки и эмбеддинги
     chunks = chunk_text(text)
-    embeddings = get_embeddings(chunks)
+    embeddings = await encode_async_embeddings(chunks)
 
-    # Готовим точки и заливаем в Qdrant
     points = []
     for chunk, emb in zip(chunks, embeddings):
         points.append({
@@ -146,7 +131,6 @@ async def api_chat(request):
             stream_llm_response(user_msg),
             content_type='application/x-ndjson'
         )
-        # response['X-Accel-Buffering'] = 'no' # Для Nginx, чтобы не буферизовал ответ
         return response
 
     except json.JSONDecodeError:

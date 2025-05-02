@@ -24,12 +24,11 @@
         }
 
         .chat-container {
-            height: calc(100vh - 40px); /* Adjust height based on viewport minus margins/padding */
-            margin: 20px auto; /* Center container and add top/bottom margin */
-            max-width: 48rem; /* Equivalent to max-w-3xl or max-w-4xl depending on base size */
+            height: calc(100vh - 40px);
+            margin: 20px auto;
+            max-width: 48rem;
         }
 
-        /* Ensure body takes full height for chat container calculation */
         html, body {
             height: 100%;
             margin: 0;
@@ -37,29 +36,25 @@
         }
 
         body {
-            display: flex; /* Use flexbox to help center content */
+            display: flex;
             justify-content: center;
-            align-items: flex-start; /* Align chat container to the top */
-            padding-top: 20px; /* Add padding instead of margin if needed */
+            align-items: flex-start;
+            padding-top: 20px;
             padding-bottom: 20px;
         }
 
-        /* Style for the scrollable area */
         .chat-messages {
             overflow-y: auto;
-            flex-grow: 1; /* Allows this div to take up remaining space */
+            flex-grow: 1;
         }
     </style>
 </head>
 <body class="bg-gray-50 font-sans">
 
-{% comment %} Load necessary Django template tags {% endcomment %}
 {% load static %}
 {% load i18n %}
-{% comment %} Define URL variables for easier use in template and JS {% endcomment %}
 {% url 'chat:index' as chat_index_url %}
 {% url 'chat:handle_upload' as upload_submit_url %}
-
 
 
 <div class="max-w-4xl w-full mx-auto p-4">
@@ -90,7 +85,6 @@
                 </div>
             </div>
 
-            <!-- Upload Area -->
             <div class="flex space-x-3 message-animate">
                 <div class="flex-shrink-0">
                     <div class="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center">
@@ -98,13 +92,7 @@
                     </div>
                 </div>
                 <div class="bg-blue-50 rounded-lg p-4 max-w-[80%] w-full">
-                    <!--
-                        Form Setup:
-                        - method="POST"
-                        - enctype="multipart/form-data" is crucial for file uploads.
-                        - action points to the Django URL that handles the POST request.
-                        - {% csrf_token %} is essential for Django's CSRF protection.
-                    -->
+                    {% csrf_token %}
                     <form id="upload-form" method="POST" enctype="multipart/form-data" action="{{ upload_submit_url }}"
                           class="space-y-4">
                         {% csrf_token %}
@@ -177,23 +165,21 @@
     document.addEventListener("DOMContentLoaded", () => {
         const form = document.getElementById("upload-form");
         const fileInput = document.getElementById("file-upload");
-        const dropZone = document.getElementById("drop-zone"); // Use ID for drop zone
+        const dropZone = document.getElementById("drop-zone");
         const notification = document.getElementById('upload-notification');
-        const filenameDisplay = document.getElementById('upload-filename'); // Renamed for clarity
-        const filesizeDisplay = document.getElementById('upload-filesize'); // Renamed for clarity
+        const filenameDisplay = document.getElementById('upload-filename');
+        const filesizeDisplay = document.getElementById('upload-filesize');
         const removeFileBtn = document.getElementById('remove-file-btn');
         const errorContainer = document.getElementById('upload-error');
         const errorMessage = document.getElementById('error-message');
         const uploadButton = document.getElementById('upload-button');
 
-        // Function to get CSRF token from cookies (Standard Django way)
         function getCookie(name) {
             let cookieValue = null;
             if (document.cookie && document.cookie !== '') {
                 const cookies = document.cookie.split(';');
                 for (let i = 0; i < cookies.length; i++) {
                     const cookie = cookies[i].trim();
-                    // Does this cookie string begin with the name we want?
                     if (cookie.substring(0, name.length + 1) === (name + '=')) {
                         cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
                         break;
@@ -205,54 +191,47 @@
 
         const csrftoken = getCookie('csrftoken');
 
-        // Helper to format file size
         function formatFileSize(bytes) {
             if (bytes === 0) return '0 Bytes';
             const k = 1024;
             const sizes = ['Bytes', 'KB', 'MB', 'GB'];
             const i = Math.floor(Math.log(bytes) / Math.log(k));
-            if (i >= sizes.length) return `${(bytes / Math.pow(k, sizes.length - 1)).toFixed(2)} ${sizes[sizes.length - 1]}`; // Handle very large files
+            if (i >= sizes.length) return `${(bytes / Math.pow(k, sizes.length - 1)).toFixed(2)} ${sizes[sizes.length - 1]}`;
             return `${parseFloat((bytes / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`;
         }
 
-        // Show error message
         function showError(message) {
             errorMessage.textContent = message;
             errorContainer.classList.remove('hidden');
-            notification.classList.add('hidden'); // Hide success notification if error occurs
+            notification.classList.add('hidden');
         }
 
-        // Hide error message
         function hideError() {
             errorContainer.classList.add('hidden');
             errorMessage.textContent = '';
         }
 
-        // Show file information in the notification area
         function showFileInfo(file) {
-            hideError(); // Hide any previous errors
+            hideError();
             filenameDisplay.textContent = `Файл: ${file.name}`;
             filesizeDisplay.textContent = `Размер: ${formatFileSize(file.size)}`;
             notification.classList.remove('hidden');
-            dropZone.classList.add('border-green-500', 'bg-green-50'); // Indicate success visually
+            dropZone.classList.add('border-green-500', 'bg-green-50');
         }
 
-        // Clear file info and reset input
         function clearFileInfo() {
-            fileInput.value = ''; // Clear the selected file
+            fileInput.value = '';
             notification.classList.add('hidden');
             filenameDisplay.textContent = '';
             filesizeDisplay.textContent = '';
-            unhighlightDropZone(); // Reset drop zone style
-            hideError(); // Hide errors when file is removed
+            unhighlightDropZone();
+            hideError();
         }
 
-        // Handle file selection via input change
         fileInput.addEventListener('change', (e) => {
             const file = e.target.files[0];
             if (file) {
-                // Basic client-side validation (optional, enhance as needed)
-                const maxSize = 100 * 1024 * 1024; // 100MB
+                const maxSize = 100 * 1024 * 1024;
                 const allowedTypes = ['application/pdf', 'image/jpeg', 'image/png', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'text/plain'];
                 if (file.size > maxSize) {
                     showError('Ошибка: Размер файла превышает 100MB.');
@@ -266,30 +245,25 @@
                 }
                 showFileInfo(file);
             } else {
-                // Handle case where user cancels file selection
                 clearFileInfo();
             }
         });
 
-        // Button to remove the selected/dropped file
         removeFileBtn.addEventListener('click', clearFileInfo);
 
 
-        // --- Drag and drop functionality ---
         function preventDefaults(e) {
             e.preventDefault();
             e.stopPropagation();
         }
 
         function highlightDropZone() {
-            // Avoid highlighting if a file is already successfully shown
             if (!notification.classList.contains('hidden')) return;
             dropZone.classList.add('border-blue-500', 'bg-blue-50');
             dropZone.classList.remove('border-gray-300');
         }
 
         function unhighlightDropZone() {
-            // Only remove highlight if not showing success state
             if (notification.classList.contains('hidden')) {
                 dropZone.classList.remove('border-blue-500', 'bg-blue-50', 'border-green-500', 'bg-green-50');
                 dropZone.classList.add('border-gray-300');
@@ -298,7 +272,7 @@
 
         ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
             dropZone.addEventListener(eventName, preventDefaults, false);
-            document.body.addEventListener(eventName, preventDefaults, false); // Prevent browser default drag behavior
+            document.body.addEventListener(eventName, preventDefaults, false);
         });
 
         ['dragenter', 'dragover'].forEach(eventName => {
@@ -310,7 +284,6 @@
         });
 
         dropZone.addEventListener('click', () => {
-            // Allow clicking dropzone to open file dialog unless showing success
             if (notification.classList.contains('hidden')) {
                 fileInput.click();
             }
@@ -321,82 +294,66 @@
             const files = dt.files;
 
             if (files.length > 0) {
-                // Assign dropped files to the file input
                 fileInput.files = files;
-                // Manually trigger the 'change' event on the file input
-                // so our existing validation and display logic runs.
                 const event = new Event('change', {bubbles: true});
                 fileInput.dispatchEvent(event);
             }
         }, false);
-        // --- End Drag and drop ---
 
-
-        // --- Form submission handler ---
         form.addEventListener('submit', async (e) => {
-            e.preventDefault(); // Prevent default browser form submission
-            hideError(); // Hide previous errors on new submission attempt
+            e.preventDefault();
+            hideError();
 
             if (!fileInput.files || fileInput.files.length === 0) {
                 showError('Пожалуйста, выберите или перетащите файл для загрузки.');
                 return;
             }
 
-            uploadButton.disabled = true; // Disable button during upload
+            uploadButton.disabled = true;
             uploadButton.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Загрузка...';
 
-            const formData = new FormData(form); // Gathers all form data including file, select value, and CSRF token input
+            const formData = new FormData(form);
 
             try {
-                const response = await fetch("{{ upload_submit_url }}", { // Use form's action attribute URL
+                const response = await fetch("{{ upload_submit_url }}", {
                     method: 'POST',
                     headers: {
-                        'X-CSRFToken': csrftoken, // Crucial: Add CSRF token header
-                        'Accept': 'application/json' // Indicate we expect JSON back on error
+                        'X-CSRFToken': csrftoken,
+                        'Accept': 'application/json'
                     },
-                    body: formData // FormData sets Content-Type automatically
+                    body: formData
                 });
 
                 if (response.ok) {
-                    // Success! Django view likely sent a redirect response.
-                    // The browser usually handles 3xx redirects automatically after a fetch.
                     console.log('Upload successful, server responded OK.');
 
-                    // Check if the response URL is different (indicating a redirect occurred)
                     if (response.redirected) {
                         console.log('Redirect detected, navigating to:', response.url);
-                        window.location.href = response.url; // Navigate to the final URL
+                        window.location.href = response.url;
                     } else {
-                        // If no redirect, assume success and navigate back manually
-                        // (using the URL generated by Django template tag)
                         console.log('No redirect detected, navigating back to chat index.');
                         window.location.href = "{{ chat_index_url }}";
                     }
-                    // No need to re-enable the button here as the page will navigate away.
 
                 } else {
-                    // Handle HTTP errors (like 400, 403, 500)
-                    let errorData = {error: `Ошибка сервера: ${response.status} ${response.statusText}`}; // Default error
+                    let errorData = {error: `Ошибка сервера: ${response.status} ${response.statusText}`};
                     try {
-                        // Try to parse JSON error response from the server view
                         const data = await response.json();
                         if (data && data.error) {
                             errorData.error = data.error;
                         }
                     } catch (jsonError) {
                         console.warn("Could not parse JSON error response:", jsonError);
-                        // Use the default HTTP status text if JSON parsing fails
                     }
                     console.error('Upload failed:', errorData);
                     showError(`Ошибка загрузки: ${errorData.error}`);
-                    uploadButton.disabled = false; // Re-enable button on failure
+                    uploadButton.disabled = false;
                     uploadButton.innerHTML = '<i class="fas fa-upload mr-2"></i>Загрузить';
                 }
             } catch (error) {
-                // Handle network errors or exceptions during fetch
                 console.error('Network or fetch error:', error);
                 showError('Сетевая ошибка или ошибка при отправке запроса. Проверьте соединение и попробуйте снова.');
-                uploadButton.disabled = false; // Re-enable button on failure
+                uploadButton.disabled = false;
                 uploadButton.innerHTML = '<i class="fas fa-upload mr-2"></i>Загрузить';
             }
         });

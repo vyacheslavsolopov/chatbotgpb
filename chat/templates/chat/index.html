@@ -14,7 +14,6 @@
             href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
     />
     <style>
-        /* Стили остаются прежними */
         @keyframes fadeIn {
             from {
                 opacity: 0;
@@ -57,27 +56,20 @@
             }
         }
 
-        /* ... остальные стили ... */
         .chat-container {
             height: calc(100vh - 40px);
             margin: 20px 0;
         }
 
-        /* Проверьте эту высоту, может потребоваться подстройка */
-
-        /* Добавим стиль для содержимого сообщения бота, которое будет обновляться */
         .bot-message-content p {
             margin-bottom: 0;
         }
 
-        /* Убрать лишний отступ у параграфа внутри */
     </style>
 </head>
 <body class="bg-gray-50 font-sans">
 <div class="max-w-4xl mx-auto p-4">
-    <!-- Chat Container -->
     <div class="bg-white rounded-xl shadow-md overflow-hidden chat-container flex flex-col">
-        <!-- Chat Header -->
         <div class="bg-gradient-to-r from-blue-900 to-orange-500 text-white p-4 flex items-center justify-between">
             <div class="flex items-center gap-3">
                 <div class="w-10 h-10 rounded-full bg-blue-700 flex items-center justify-center p-0 relative">
@@ -93,9 +85,7 @@
             </div>
         </div>
 
-        <!-- Messages Area -->
         <div id="chat-messages" class="flex-grow p-4 space-y-4 overflow-y-auto">
-            <!-- Welcome Message -->
             <div class="flex space-x-3 message-animate">
                 <div class="flex-shrink-0">
                     <div class="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center">
@@ -103,12 +93,12 @@
                     </div>
                 </div>
                 <div class="bg-blue-50 rounded-lg p-3 max-w-[80%]">
-                    <div class="bot-message-content"> <!-- Обертка для контента -->
+                    <div class="bot-message-content">
                         <p class="text-gray-800">
                             Здравствуйте! Я виртуальный помощник Газпромбанка. Чем могу помочь Вам сегодня?
                         </p>
                     </div>
-                    <div class="suggestions-container mt-2 flex flex-wrap gap-2"> <!-- Обертка для кнопок -->
+                    <div class="suggestions-container mt-2 flex flex-wrap gap-2">
                         {% for button in initial_buttons %}
                             <button class="suggestion-btn px-3 py-1 bg-white text-orange-700 rounded-full text-sm border border-orange-300 hover:bg-orange-100 transition">
                                 {{ button.text }}
@@ -119,7 +109,6 @@
             </div>
         </div>
 
-        <!-- Input Area -->
         <div class="border-t p-4 bg-gray-50">
             <div class="relative flex items-end">
                 <textarea id="message-input" rows="1"
@@ -143,7 +132,6 @@
         const btn = document.getElementById("send-button");
         const chat = document.getElementById("chat-messages");
 
-        // Функция для добавления пользовательского сообщения (остается почти такой же)
         function addUserMessage(text) {
             const el = document.createElement("div");
             el.className = `flex space-x-3 message-animate justify-end`;
@@ -160,10 +148,8 @@
             chat.scrollTop = chat.scrollHeight;
         }
 
-        // Функция для создания ПУСТОГО блока сообщения бота
         function addBotMessageContainer() {
             const el = document.createElement("div");
-            // Уникальный ID для обновления
             const messageId = `bot-message-${Date.now()}`;
             el.id = messageId;
             el.className = `flex space-x-3 message-animate`;
@@ -175,33 +161,24 @@
                </div>
                <div class="bg-blue-50 rounded-lg p-3 max-w-[80%]">
                  <div class="bot-message-content text-gray-800">
-                    <p></p> <!-- Пустой параграф для начала -->
+                    <p></p>
                  </div>
                  <div class="suggestions-container mt-2 flex flex-wrap gap-2">
-                   <!-- Кнопки будут добавлены сюда позже -->
                  </div>
                </div>`;
             chat.appendChild(el);
             chat.scrollTop = chat.scrollHeight;
-            // Возвращаем ID контейнера и сам элемент для дальнейшего обновления
             return {messageId, element: el};
         }
 
         function processLine(line, contentElement, suggestionsContainer, botMessageContainer) {
-            // console.log("Processing line:", line); // Optional debug
             try {
                 const data = JSON.parse(line);
-                // console.log("Parsed data:", data); // Optional debug
 
-                if (data.type === 'chunk' && data.content !== undefined) { // Check content exists
-                    // *** REPLACE the content, don't append ***
-                    // Parse the received chunk's content as Markdown and set it
+                if (data.type === 'chunk' && data.content !== undefined) {
                     contentElement.innerHTML = marked.parse(data.content);
-                    // If you need sanitization (highly recommended if Markdown can contain HTML):
-                    // contentElement.innerHTML = DOMPurify.sanitize(marked.parse(data.content));
 
                 } else if (data.type === 'suggestions' && data.content) {
-                    // Suggestions still replace the previous ones
                     suggestionsContainer.innerHTML = data.content.map(s => `
                         <button class="suggestion-btn px-3 py-1 bg-white text-orange-700 rounded-full text-sm border border-orange-300 hover:bg-orange-100 transition">
                           ${escapeHtml(s.text)} <!-- Escape button text -->
@@ -210,22 +187,17 @@
                     attachSuggestionButtonListeners(botMessageContainer.element);
 
                 } else if (data.type === 'error' && data.content) {
-                    // Replace content with the error message
                     contentElement.innerHTML = `<span class="text-red-600">${marked.parseInline(data.content)}</span>`; // Use parseInline for simple error text
                 }
 
-                // Scroll to bottom after content update
                 chat.scrollTop = chat.scrollHeight;
 
             } catch (e) {
                 console.error("Error parsing JSON line:", line, e);
-                // Optionally display a parsing error in the chat
                 contentElement.innerHTML = `<span class="text-yellow-600 text-xs">[Ошибка обработки части ответа: ${escapeHtml(line)}]</span>`;
             }
         }
 
-        // Make sure the rest of handleStreamedResponse correctly calls processLine
-        // and that escapeHtml is defined as before:
         function escapeHtml(unsafe) {
             if (!unsafe) return '';
             return unsafe
@@ -236,61 +208,50 @@
                 .replace(/'/g, "'");
         }
 
-        // --- Function for handling streamed response ---
         async function handleStreamedResponse(response, botMessageContainer) {
             const reader = response.body.getReader();
             const decoder = new TextDecoder();
-            let buffer = ''; // Buffer for incomplete lines
+            let buffer = '';
 
-            // Get references ONCE, pass them to processLine
             const contentElement = botMessageContainer.element.querySelector('.bot-message-content p');
             const suggestionsContainer = botMessageContainer.element.querySelector('.suggestions-container');
 
-            contentElement.innerHTML = ''; // Clear initial content
+            contentElement.innerHTML = '';
 
             try {
                 while (true) {
                     const {value, done} = await reader.read();
                     if (done) {
-                        // console.log("Stream finished."); // Optional debug
-                        // Process any remaining data in the buffer
                         if (buffer.trim()) {
-                            processLine(buffer, contentElement, suggestionsContainer, botMessageContainer); // Pass elements
-                            buffer = ''; // Clear buffer after processing last part
+                            processLine(buffer, contentElement, suggestionsContainer, botMessageContainer);
+                            buffer = '';
                         }
-                        break; // Exit loop
+                        break;
                     }
 
                     buffer += decoder.decode(value, {stream: true});
-                    // console.log("Buffer updated:", buffer); // Optional debug
 
                     const lines = buffer.split('\n');
-                    buffer = lines.pop(); // Keep the potentially incomplete last line in buffer
+                    buffer = lines.pop();
 
                     for (const line of lines) {
                         if (line.trim() === '') continue;
-                        // Pass references to elements to avoid repeated lookups
                         processLine(line, contentElement, suggestionsContainer, botMessageContainer);
                     }
-                    // Scrolling is now handled inside processLine after content update
                 }
 
             } catch (error) {
                 console.error("Error reading stream:", error);
-                // Display error in the content element
                 contentElement.innerHTML = `<span class="text-red-600">Ошибка получения ответа от сервера.</span>`;
-                chat.scrollTop = chat.scrollHeight; // Scroll after error
+                chat.scrollTop = chat.scrollHeight;
             } finally {
                 removeTypingIndicator();
-                // Ensure scroll is at bottom in finally block too,
-                // in case the last update didn't trigger it enough
                 chat.scrollTop = chat.scrollHeight;
             }
         }
 
 
         function showTypingIndicator() {
-            // Проверяем, нет ли уже индикатора
             if (document.getElementById("typing-indicator")) return;
 
             const tip = document.createElement("div");
@@ -320,12 +281,12 @@
             const text = input.value.trim();
             if (!text) return;
 
-            addUserMessage(text); // Добавляем сообщение пользователя
+            addUserMessage(text);
             input.value = '';
-            input.style.height = 'auto'; // Сбросить высоту textarea
-            input.focus(); // Возвращаем фокус
+            input.style.height = 'auto';
+            input.focus();
 
-            showTypingIndicator(); // Показываем индикатор "печатает"
+            showTypingIndicator();
 
             try {
                 const res = await fetch("/api/chat/", {
@@ -335,21 +296,17 @@
                 });
 
                 if (!res.ok) {
-                    // Обработка ошибок HTTP (не 2xx)
-                    const errorData = await res.json().catch(() => ({error: 'Ошибка сервера'})); // Пытаемся прочитать тело ошибки
+                    const errorData = await res.json().catch(() => ({error: 'Ошибка сервера'}));
                     throw new Error(errorData.error || `HTTP error! status: ${res.status}`);
                 }
 
                 if (res.headers.get("content-type")?.includes("application/x-ndjson")) {
-                    // Если это наш потоковый ответ
-                    removeTypingIndicator(); // Убираем индикатор "печатает", т.к. начинаем показывать ответ
-                    const botMessageContainer = addBotMessageContainer(); // Создаем контейнер для ответа бота
-                    await handleStreamedResponse(res, botMessageContainer); // Обрабатываем поток
+                    removeTypingIndicator();
+                    const botMessageContainer = addBotMessageContainer();
+                    await handleStreamedResponse(res, botMessageContainer);
                 } else {
-                    // Обработка обычного JSON ответа (на всякий случай, если API вернуло не поток)
                     removeTypingIndicator();
                     const {message, suggestions} = await res.json();
-                    // Используем старый метод addMessage или адаптируем addBotMessageContainer
                     const botMsg = addBotMessageContainer();
                     botMsg.element.querySelector('.bot-message-content p').innerHTML = marked.parse(message);
                     const suggestionsContainer = botMsg.element.querySelector('.suggestions-container');
@@ -367,26 +324,21 @@
             } catch (e) {
                 console.error("Fetch error:", e);
                 removeTypingIndicator();
-                // Показываем ошибку в чате
                 const errorContainer = addBotMessageContainer();
                 errorContainer.element.querySelector('.bot-message-content p').innerHTML = `<span class="text-red-500">Ошибка: ${e.message || 'Не удалось связаться с сервером.'}</span>`;
                 chat.scrollTop = chat.scrollHeight;
             }
         }
 
-        // Функция для добавления обработчиков к кнопкам-подсказкам
         function attachSuggestionButtonListeners(container = document) {
             container.querySelectorAll(".suggestion-btn").forEach(b => {
-                // Удаляем старый обработчик, если он был (чтобы избежать дублирования)
                 b.replaceWith(b.cloneNode(true));
             });
-            // Находим кнопки заново (после клонирования) и добавляем обработчик
+
             container.querySelectorAll(".suggestion-btn").forEach(b => {
                 b.addEventListener("click", () => {
                     input.value = b.textContent.trim();
                     input.focus();
-                    // Опционально: сразу отправить сообщение по клику на кнопку
-                    // sendMessage();
                 });
             });
         }
@@ -398,25 +350,18 @@
                 e.preventDefault();
                 sendMessage();
             }
-            // Динамическое изменение высоты textarea
-            // Небольшая задержка, чтобы значение успело обновиться
+
             setTimeout(() => {
                 input.style.height = 'auto';
                 input.style.height = (input.scrollHeight) + 'px';
             }, 0);
         });
 
-        // Привязываем обработчики к начальным кнопкам
         attachSuggestionButtonListeners();
 
-        // Динамическое изменение высоты textarea при вводе
         input.addEventListener('input', () => {
             input.style.height = 'auto';
-            // Устанавливаем высоту на основе scrollHeight, но не более определенного максимума, если нужно
             input.style.height = (input.scrollHeight) + 'px';
-            // Например, ограничение высоты:
-            // const maxHeight = 120; // Максимальная высота в пикселях
-            // input.style.height = Math.min(input.scrollHeight, maxHeight) + 'px';
         });
     });
 </script>

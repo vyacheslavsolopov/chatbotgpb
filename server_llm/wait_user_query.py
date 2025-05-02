@@ -1,11 +1,8 @@
-# --- wait_user_query.py ---
-
 import json
 import pika
 import requests
 import logging
 import time
-import sseclient  # Install using: pip install sseclient-py
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -82,7 +79,7 @@ def stream_llm_response(ch, method, props, prompt_text: str):
     logger.info(f"Sending stream request to LLM (OpenAI format) (ID: {correlation_id}): {prompt_text[:100]}...")
 
     success = True
-    stream_client = None  # To close the stream connection in finally block
+    stream_client = None
     try:
         response = requests.post(LLM_API_URL, headers=headers, json=data, stream=True, timeout=180)
 
@@ -151,7 +148,6 @@ def stream_llm_response(ch, method, props, prompt_text: str):
             logger.error(f"Failed to publish unexpected error for {correlation_id}: {pub_e}")
         success = False
     finally:
-        # Ensure the underlying stream connection is closed
         if stream_client:
             try:
                 stream_client.close()
@@ -159,7 +155,6 @@ def stream_llm_response(ch, method, props, prompt_text: str):
             except Exception as close_e:
                 logger.warning(f"Error closing SSEClient connection for {correlation_id}: {close_e}")
 
-        # Send END marker only if the stream initiated and finished without critical errors before completion signal
         if success:
             try:
                 logger.info(f"Sending END marker for stream {correlation_id}")
@@ -176,39 +171,33 @@ def stream_llm_response(ch, method, props, prompt_text: str):
             logger.warning(
                 f"Stream {correlation_id} finished with errors or did not start properly, not sending END marker.")
 
-        # Acknowledge the original request message after processing is complete (or failed)
         try:
             ch.basic_ack(delivery_tag=delivery_tag)
             logger.info(f"Original stream message {correlation_id} acknowledged.")
         except Exception as e:
-            # Log error, but connection might be closed already if publish failed
             logger.error(f"Failed to ACK stream message {correlation_id}: {e}")
 
 
-# --- Main callback ---
 def on_request(ch, method, props, body):
     """ Callback function called when receiving a message from TASK_QUEUE_NAME """
     correlation_id = props.correlation_id
     reply_to_queue = props.reply_to
 
-    print(  # Use print for visibility during testing, switch to logger if preferred
+    print(
         f"\n [x] Received request (ID: {correlation_id}) from '{reply_to_queue if reply_to_queue else 'No Reply Queue!'}'.")
 
     try:
         data = json.loads(body)
         user_message = data.get('message', '')
-        # Default to False if 'stream' key is missing
         is_stream_request = data.get('stream', False)
 
         if is_stream_request:
             logger.info(f"Processing STREAM request {correlation_id}...")
-            # Pass 'method' for ACK handling inside the function
             stream_llm_response(ch, method, props, user_message)
-            # ACK is handled *inside* stream_llm_response's finally block
         else:
             logger.info(f"Processing SINGLE request {correlation_id}...")
-            response_text = query_llm_single(user_message)  # Uses updated function
-            response_payload_data = {"llm_response": response_text}  # Match client expectation
+            response_text = query_llm_single(user_message)
+            response_payload_data = {"llm_response": response_text}
             response_payload = json.dumps(response_payload_data)
 
             if not reply_to_queue:
@@ -225,16 +214,14 @@ def on_request(ch, method, props, body):
                 except Exception as e:
                     logger.error(f"Error sending single response for {correlation_id} to {reply_to_queue}: {e}")
 
-            # Acknowledge single request message
             try:
-                ch.basic_ack(delivery_tag=method.delivery_tag)  # ACK for single req
+                ch.basic_ack(delivery_tag=method.delivery_tag)
                 logger.info(f"Single message {correlation_id} acknowledged.")
             except Exception as e:
                 logger.error(f"Failed to ACK single message {correlation_id}: {e}")
 
     except json.JSONDecodeError:
         logger.error(f" [!] Error decoding incoming JSON request for {correlation_id}")
-        # Send error back if possible
         if reply_to_queue and correlation_id:
             error_payload = json.dumps({"type": MSG_TYPE_ERROR, "content": "Invalid JSON format received by worker"})
             try:
@@ -242,7 +229,6 @@ def on_request(ch, method, props, body):
                                  properties=pika.BasicProperties(correlation_id=correlation_id), body=error_payload)
             except Exception as pub_e:
                 logger.error(f"Failed to send JSON decode error reply for {correlation_id}: {pub_e}")
-        # Always ACK invalid message to remove it from queue
         try:
             ch.basic_ack(delivery_tag=method.delivery_tag)
             logger.info(f"Invalid JSON message {correlation_id} acknowledged.")
@@ -251,7 +237,6 @@ def on_request(ch, method, props, body):
 
     except Exception as e:
         logger.error(f" [!] Error during request processing callback for {correlation_id}: {e}", exc_info=True)
-        # Send error back if possible
         if reply_to_queue and correlation_id:
             error_payload = json.dumps({"type": MSG_TYPE_ERROR, "content": f"LLM worker processing error: {e}"})
             try:
@@ -259,7 +244,6 @@ def on_request(ch, method, props, body):
                                  properties=pika.BasicProperties(correlation_id=correlation_id), body=error_payload)
             except Exception as pub_e:
                 logger.error(f"Failed to send processing error reply for {correlation_id}: {pub_e}")
-        # Always ACK message that caused an exception during processing
         try:
             ch.basic_ack(delivery_tag=method.delivery_tag)
             logger.info(f"Message {correlation_id} acknowledged after processing error.")
@@ -267,7 +251,6 @@ def on_request(ch, method, props, body):
             logger.error(f"Failed to ACK message after processing error {correlation_id}: {ack_e}")
 
 
-# --- start_worker ---
 def start_worker():
     """Connects to RabbitMQ and starts consuming messages."""
     connection = None
@@ -277,21 +260,18 @@ def start_worker():
             connection = pika.BlockingConnection(
                 pika.ConnectionParameters(
                     host=RABBITMQ_HOST,
-                    heartbeat=60,  # Keep connection alive
-                    blocked_connection_timeout=300  # Allow Pika blocking operations more time
+                    heartbeat=60,
+                    blocked_connection_timeout=300
                 )
             )
             logger.info("Connection successful.")
             channel = connection.channel()
 
-            # Declare the queue, ensuring it exists and is durable
             channel.queue_declare(queue=TASK_QUEUE_NAME, durable=True)
             logger.info(f" [*] Queue '{TASK_QUEUE_NAME}' declared/ready.")
 
-            # Process one message at a time
             channel.basic_qos(prefetch_count=1)
 
-            # Use manual acknowledgements
             channel.basic_consume(queue=TASK_QUEUE_NAME, on_message_callback=on_request, auto_ack=False)
 
             logger.info(" [*] Waiting for messages. To exit press CTRL+C")
@@ -326,5 +306,4 @@ def start_worker():
 
 
 if __name__ == '__main__':
-    # Make sure to install the SSE client: pip install sseclient-py
     start_worker()
