@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>Загрузка документов</title>
+    <link rel="icon" type="image/png" href="https://www.gazprombank.ru/favicon.ico"/>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"/>
+    <style>
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .message-animate {
+            animation: fadeIn 0.3s ease-out forwards;
+        }
+
+        .chat-container {
+            height: calc(100vh - 40px); /* Adjust height based on viewport minus margins/padding */
+            margin: 20px auto; /* Center container and add top/bottom margin */
+            max-width: 48rem; /* Equivalent to max-w-3xl or max-w-4xl depending on base size */
+        }
+
+        /* Ensure body takes full height for chat container calculation */
+        html, body {
+            height: 100%;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            display: flex; /* Use flexbox to help center content */
+            justify-content: center;
+            align-items: flex-start; /* Align chat container to the top */
+            padding-top: 20px; /* Add padding instead of margin if needed */
+            padding-bottom: 20px;
+        }
+
+        /* Style for the scrollable area */
+        .chat-messages {
+            overflow-y: auto;
+            flex-grow: 1; /* Allows this div to take up remaining space */
+        }
+    </style>
+</head>
+<body class="bg-gray-50 font-sans">
+
+{% comment %} Load necessary Django template tags {% endcomment %}
+{% load static %}
+{% load i18n %}
+{% comment %} Define URL variables for easier use in template and JS {% endcomment %}
+{% url 'chat:index' as chat_index_url %}
+{% url 'chat:handle_upload' as upload_submit_url %}
+
+
+
+<div class="max-w-4xl w-full mx-auto p-4">
+    <div class="bg-white rounded-xl shadow-md overflow-hidden chat-container flex flex-col">
+        <div class="bg-gradient-to-r from-blue-900 to-orange-500 text-white p-4 flex items-center justify-between flex-shrink-0">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-full bg-blue-700 flex items-center justify-center p-0 relative">
+                    <i class="fas fa-robot text-white text-xl absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2"></i>
+                </div>
+                <span class="font-medium text-lg">Загрузка документов</span>
+            </div>
+            <a href="{{ chat_index_url }}" class="text-white hover:text-orange-200 transition flex items-center">
+                <i class="fas fa-arrow-left mr-2"></i>Вернуться к чату
+            </a>
+        </div>
+
+        <div class="flex-grow p-6 space-y-4 chat-messages">
+            <div class="flex space-x-3 message-animate">
+                <div class="flex-shrink-0">
+                    <div class="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center">
+                        <i class="fas fa-robot text-blue-900"></i>
+                    </div>
+                </div>
+                <div class="bg-blue-50 rounded-lg p-4 max-w-[80%]">
+                    <p class="text-gray-800">
+                        Здесь вы можете загрузить необходимые документы для обработки. Пожалуйста, выберите тип
+                        документа и прикрепите файл.
+                    </p>
+                </div>
+            </div>
+
+            <!-- Upload Area -->
+            <div class="flex space-x-3 message-animate">
+                <div class="flex-shrink-0">
+                    <div class="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center">
+                        <i class="fas fa-robot text-blue-900"></i>
+                    </div>
+                </div>
+                <div class="bg-blue-50 rounded-lg p-4 max-w-[80%] w-full">
+                    <!--
+                        Form Setup:
+                        - method="POST"
+                        - enctype="multipart/form-data" is crucial for file uploads.
+                        - action points to the Django URL that handles the POST request.
+                        - {% csrf_token %} is essential for Django's CSRF protection.
+                    -->
+                    <form id="upload-form" method="POST" enctype="multipart/form-data" action="{{ upload_submit_url }}"
+                          class="space-y-4">
+                        {% csrf_token %}
+
+                        <div class="space-y-2">
+                            <label for="file-upload" class="block text-sm font-medium text-gray-700">
+                                Загрузите файл <span class="text-red-500">*</span>
+                            </label>
+                            <div class="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-300 border-dashed rounded-lg hover:border-blue-500 transition-colors cursor-pointer"
+                                 id="drop-zone">
+                                <div class="space-y-1 text-center">
+                                    <i class="fas fa-cloud-upload-alt text-3xl text-gray-400"></i>
+                                    <div class="flex text-sm text-gray-600 justify-center">
+                                        <label for="file-upload"
+                                               class="relative cursor-pointer bg-white rounded-md font-medium text-blue-900 hover:text-blue-700 focus-within:outline-none px-1">
+                                            <span>Загрузить файл</span>
+                                            <input id="file-upload" name="file-upload" type="file" class="sr-only"
+                                                   accept=".pdf,.docx,.txt" required>
+                                        </label>
+                                        <p class="pl-1">или перетащите сюда</p>
+                                    </div>
+                                    <p class="text-xs text-gray-500">
+                                        PDF, DOCX, TXT (до 100MB)
+                                    </p>
+                                </div>
+                            </div>
+                            <div id="upload-notification"
+                                 class="hidden mt-3 p-3 bg-green-50 border border-green-200 rounded-lg transition-all duration-300 ease-out">
+                                <div class="flex items-center">
+                                    <i class="fas fa-check-circle text-green-500 mr-2 flex-shrink-0"></i>
+                                    <div class="flex-grow">
+                                        <p class="text-sm font-medium text-green-800" id="upload-filename"></p>
+                                        <p class="text-xs text-green-700" id="upload-filesize"></p>
+                                    </div>
+                                    <button type="button" id="remove-file-btn"
+                                            class="ml-2 text-red-500 hover:text-red-700 text-sm flex-shrink-0"
+                                            title="Удалить файл">
+                                        <i class="fas fa-times-circle"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            <div id="upload-error"
+                                 class="hidden mt-3 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+                                <i class="fas fa-exclamation-circle mr-2"></i>
+                                <span id="error-message"></span>
+                            </div>
+                        </div>
+
+                        <div class="flex justify-end pt-2">
+                            <button type="submit"
+                                    class="px-5 py-2 bg-blue-900 text-white font-medium rounded-lg hover:bg-orange-500 transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
+                                    id="upload-button">
+                                <i class="fas fa-upload mr-2"></i>Загрузить
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <div class="border-t p-4 bg-gray-100 flex-shrink-0">
+            <p class="text-xs text-gray-500 text-center">
+                Газпромбанк рекомендует проверять важную информацию через официальный сайт или колл-центр.
+            </p>
+        </div>
+    </div>
+</div>
+
+<script>
+    document.addEventListener("DOMContentLoaded", () => {
+        const form = document.getElementById("upload-form");
+        const fileInput = document.getElementById("file-upload");
+        const dropZone = document.getElementById("drop-zone"); // Use ID for drop zone
+        const notification = document.getElementById('upload-notification');
+        const filenameDisplay = document.getElementById('upload-filename'); // Renamed for clarity
+        const filesizeDisplay = document.getElementById('upload-filesize'); // Renamed for clarity
+        const removeFileBtn = document.getElementById('remove-file-btn');
+        const errorContainer = document.getElementById('upload-error');
+        const errorMessage = document.getElementById('error-message');
+        const uploadButton = document.getElementById('upload-button');
+
+        // Function to get CSRF token from cookies (Standard Django way)
+        function getCookie(name) {
+            let cookieValue = null;
+            if (document.cookie && document.cookie !== '') {
+                const cookies = document.cookie.split(';');
+                for (let i = 0; i < cookies.length; i++) {
+                    const cookie = cookies[i].trim();
+                    // Does this cookie string begin with the name we want?
+                    if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                        cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                        break;
+                    }
+                }
+            }
+            return cookieValue;
+        }
+
+        const csrftoken = getCookie('csrftoken');
+
+        // Helper to format file size
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            if (i >= sizes.length) return `${(bytes / Math.pow(k, sizes.length - 1)).toFixed(2)} ${sizes[sizes.length - 1]}`; // Handle very large files
+            return `${parseFloat((bytes / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`;
+        }
+
+        // Show error message
+        function showError(message) {
+            errorMessage.textContent = message;
+            errorContainer.classList.remove('hidden');
+            notification.classList.add('hidden'); // Hide success notification if error occurs
+        }
+
+        // Hide error message
+        function hideError() {
+            errorContainer.classList.add('hidden');
+            errorMessage.textContent = '';
+        }
+
+        // Show file information in the notification area
+        function showFileInfo(file) {
+            hideError(); // Hide any previous errors
+            filenameDisplay.textContent = `Файл: ${file.name}`;
+            filesizeDisplay.textContent = `Размер: ${formatFileSize(file.size)}`;
+            notification.classList.remove('hidden');
+            dropZone.classList.add('border-green-500', 'bg-green-50'); // Indicate success visually
+        }
+
+        // Clear file info and reset input
+        function clearFileInfo() {
+            fileInput.value = ''; // Clear the selected file
+            notification.classList.add('hidden');
+            filenameDisplay.textContent = '';
+            filesizeDisplay.textContent = '';
+            unhighlightDropZone(); // Reset drop zone style
+            hideError(); // Hide errors when file is removed
+        }
+
+        // Handle file selection via input change
+        fileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                // Basic client-side validation (optional, enhance as needed)
+                const maxSize = 100 * 1024 * 1024; // 100MB
+                const allowedTypes = ['application/pdf', 'image/jpeg', 'image/png', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'text/plain'];
+                if (file.size > maxSize) {
+                    showError('Ошибка: Размер файла превышает 100MB.');
+                    clearFileInfo();
+                    return;
+                }
+                if (!allowedTypes.includes(file.type) && !file.name.match(/\.(pdf|docx|txt)$/i)) {
+                    showError('Ошибка: Недопустимый тип файла. Разрешены PDF, DOCX, TXT.');
+                    clearFileInfo();
+                    return;
+                }
+                showFileInfo(file);
+            } else {
+                // Handle case where user cancels file selection
+                clearFileInfo();
+            }
+        });
+
+        // Button to remove the selected/dropped file
+        removeFileBtn.addEventListener('click', clearFileInfo);
+
+
+        // --- Drag and drop functionality ---
+        function preventDefaults(e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+
+        function highlightDropZone() {
+            // Avoid highlighting if a file is already successfully shown
+            if (!notification.classList.contains('hidden')) return;
+            dropZone.classList.add('border-blue-500', 'bg-blue-50');
+            dropZone.classList.remove('border-gray-300');
+        }
+
+        function unhighlightDropZone() {
+            // Only remove highlight if not showing success state
+            if (notification.classList.contains('hidden')) {
+                dropZone.classList.remove('border-blue-500', 'bg-blue-50', 'border-green-500', 'bg-green-50');
+                dropZone.classList.add('border-gray-300');
+            }
+        }
+
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, preventDefaults, false);
+            document.body.addEventListener(eventName, preventDefaults, false); // Prevent browser default drag behavior
+        });
+
+        ['dragenter', 'dragover'].forEach(eventName => {
+            dropZone.addEventListener(eventName, highlightDropZone, false);
+        });
+
+        ['dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, unhighlightDropZone, false);
+        });
+
+        dropZone.addEventListener('click', () => {
+            // Allow clicking dropzone to open file dialog unless showing success
+            if (notification.classList.contains('hidden')) {
+                fileInput.click();
+            }
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            const dt = e.dataTransfer;
+            const files = dt.files;
+
+            if (files.length > 0) {
+                // Assign dropped files to the file input
+                fileInput.files = files;
+                // Manually trigger the 'change' event on the file input
+                // so our existing validation and display logic runs.
+                const event = new Event('change', {bubbles: true});
+                fileInput.dispatchEvent(event);
+            }
+        }, false);
+        // --- End Drag and drop ---
+
+
+        // --- Form submission handler ---
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault(); // Prevent default browser form submission
+            hideError(); // Hide previous errors on new submission attempt
+
+            if (!fileInput.files || fileInput.files.length === 0) {
+                showError('Пожалуйста, выберите или перетащите файл для загрузки.');
+                return;
+            }
+
+            uploadButton.disabled = true; // Disable button during upload
+            uploadButton.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Загрузка...';
+
+            const formData = new FormData(form); // Gathers all form data including file, select value, and CSRF token input
+
+            try {
+                const response = await fetch("{{ upload_submit_url }}", { // Use form's action attribute URL
+                    method: 'POST',
+                    headers: {
+                        'X-CSRFToken': csrftoken, // Crucial: Add CSRF token header
+                        'Accept': 'application/json' // Indicate we expect JSON back on error
+                    },
+                    body: formData // FormData sets Content-Type automatically
+                });
+
+                if (response.ok) {
+                    // Success! Django view likely sent a redirect response.
+                    // The browser usually handles 3xx redirects automatically after a fetch.
+                    console.log('Upload successful, server responded OK.');
+
+                    // Check if the response URL is different (indicating a redirect occurred)
+                    if (response.redirected) {
+                        console.log('Redirect detected, navigating to:', response.url);
+                        window.location.href = response.url; // Navigate to the final URL
+                    } else {
+                        // If no redirect, assume success and navigate back manually
+                        // (using the URL generated by Django template tag)
+                        console.log('No redirect detected, navigating back to chat index.');
+                        window.location.href = "{{ chat_index_url }}";
+                    }
+                    // No need to re-enable the button here as the page will navigate away.
+
+                } else {
+                    // Handle HTTP errors (like 400, 403, 500)
+                    let errorData = {error: `Ошибка сервера: ${response.status} ${response.statusText}`}; // Default error
+                    try {
+                        // Try to parse JSON error response from the server view
+                        const data = await response.json();
+                        if (data && data.error) {
+                            errorData.error = data.error;
+                        }
+                    } catch (jsonError) {
+                        console.warn("Could not parse JSON error response:", jsonError);
+                        // Use the default HTTP status text if JSON parsing fails
+                    }
+                    console.error('Upload failed:', errorData);
+                    showError(`Ошибка загрузки: ${errorData.error}`);
+                    uploadButton.disabled = false; // Re-enable button on failure
+                    uploadButton.innerHTML = '<i class="fas fa-upload mr-2"></i>Загрузить';
+                }
+            } catch (error) {
+                // Handle network errors or exceptions during fetch
+                console.error('Network or fetch error:', error);
+                showError('Сетевая ошибка или ошибка при отправке запроса. Проверьте соединение и попробуйте снова.');
+                uploadButton.disabled = false; // Re-enable button on failure
+                uploadButton.innerHTML = '<i class="fas fa-upload mr-2"></i>Загрузить';
+            }
+        });
+    });
+</script>
+
+</body>
+</html>

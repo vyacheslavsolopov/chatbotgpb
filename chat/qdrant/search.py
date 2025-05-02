@@ -2,6 +2,9 @@
 
 import os
 from typing import List, Dict
+
+import httpx
+import numpy as np
 from sentence_transformers import SentenceTransformer
 from qdrant_client import QdrantClient
 
@@ -13,7 +16,18 @@ EMBED_MODEL_NAME = "all-MiniLM-L6-v2"
 # ————————————————————
 
 # инициализация
-embedder = SentenceTransformer(EMBED_MODEL_NAME)
+API_URL = "http://localhost:8800/embed"  # Adjust if running on a different host/port
+
+
+async def get_embeddings(texts):
+    async with httpx.AsyncClient() as client:
+        payload = {"texts": texts}
+        response = await client.post(API_URL, json=payload)
+        response.raise_for_status()
+        output = response.json()["embeddings"]
+        return np.array(output)
+
+
 client = QdrantClient(
     url=f"http://{QDRANT_HOST}:{QDRANT_REST_PORT}",
     prefer_grpc=False,
@@ -21,7 +35,7 @@ client = QdrantClient(
 )
 
 
-def get_relevant_chunks(query: str, top_k: int = 5):
+async def get_relevant_chunks(query: str, top_k: int = 5):
     """
     Ищет в Qdrant наиболее релевантные фрагменты текста по запросу.
     Возвращает список словарей с полями:
@@ -29,10 +43,10 @@ def get_relevant_chunks(query: str, top_k: int = 5):
       - source: имя файла-источника
       - score:  косинусная близость
     """
-    query_emb = embedder.encode(query, convert_to_numpy=False)
+    query_emb = await get_embeddings([query])
     hits = client.search(
         collection_name=COLLECTION_NAME,
-        query_vector=query_emb,
+        query_vector=query_emb[0],
         limit=top_k,
         with_payload=True
     )

@@ -2,6 +2,7 @@ import os
 import uuid
 from typing import List
 from PyPDF2 import PdfReader
+from docx import Document
 from sentence_transformers import SentenceTransformer
 from qdrant_client import QdrantClient, models
 
@@ -16,7 +17,8 @@ DOC_FOLDER = "documents"  # папка с PDF и DOCX файлами
 # ————————————————————
 
 # Инициализация SentenceTransformer
-embedder = SentenceTransformer(EMBED_MODEL_NAME)
+print('loaded sentence transformer')
+embedder = SentenceTransformer(EMBED_MODEL_NAME, device='cpu')
 
 # Инициализация Qdrant клиента через REST API на порту 6334
 client = QdrantClient(
@@ -124,4 +126,3 @@ if __name__ == "__main__":
             upload_document_to_qdrant(os.path.join(DOC_FOLDER, fname))
     print("All documents uploaded.")
     get_collection_stats()
-

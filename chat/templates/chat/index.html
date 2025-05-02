@@ -4,6 +4,7 @@
     <meta charset="UTF-8"/>
     <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
     <title>Газпромбанк - Виртуальный помощник</title>
+    <link rel="icon" type="image/png" href="https://www.gazprombank.ru/favicon.ico"/>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <link
@@ -27,12 +28,37 @@
             animation: fadeIn 0.3s ease-out forwards;
         }
 
-        .typing-indicator span { /* ... */
+        .typing-indicator span {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            background-color: #4B5563;
+            border-radius: 50%;
+            margin: 0 2px;
+            animation: typing 1s infinite;
+        }
+
+        .typing-indicator span:nth-child(2) {
+            animation-delay: 0.2s;
+        }
+
+        .typing-indicator span:nth-child(3) {
+            animation-delay: 0.4s;
+        }
+
+        @keyframes typing {
+            0%, 100% {
+                transform: translateY(0);
+            }
+            50% {
+                transform: translateY(-5px);
+            }
         }
 
         /* ... остальные стили ... */
         .chat-container {
-            height: calc(100vh - 160px);
+            height: calc(100vh - 40px);
+            margin: 20px 0;
         }
 
         /* Проверьте эту высоту, может потребоваться подстройка */
@@ -47,27 +73,21 @@
 </head>
 <body class="bg-gray-50 font-sans">
 <div class="max-w-4xl mx-auto p-4">
-    <!-- Header -->
-    <header class="flex items-center justify-between mb-6">
-        <!-- ... header content ... -->
-        <div class="flex items-center space-x-3">
-            <div class="w-10 h-10 rounded-full bg-blue-900 flex items-center justify-center">
-                <i class="fas fa-university text-white text-xl"></i>
-            </div>
-            <h1 class="text-2xl font-bold text-gray-800">Газпромбанк</h1>
-        </div>
-    </header>
-
     <!-- Chat Container -->
     <div class="bg-white rounded-xl shadow-md overflow-hidden chat-container flex flex-col">
         <!-- Chat Header -->
         <div class="bg-gradient-to-r from-blue-900 to-orange-500 text-white p-4 flex items-center justify-between">
-            <!-- ... chat header content ... -->
-            <div class="flex items-center space-x-3">
-                <div class="w-8 h-8 rounded-full bg-blue-700 flex items-center justify-center">
-                    <i class="fas fa-university text-white"></i>
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-full bg-blue-700 flex items-center justify-center p-0 relative">
+                    <i class="fas fa-robot text-white text-xl absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2"></i>
                 </div>
-                <span class="font-medium">Помощник Газпромбанка</span>
+                <span class="font-medium text-lg">Помощник Газпромбанка</span>
+            </div>
+            <div class="flex items-center space-x-4">
+                <a href="/upload" class="text-white hover:text-orange-200 transition flex items-center">
+                    <i class="fas fa-file-upload mr-2"></i>
+                    <span>Загрузить документы</span>
+                </a>
             </div>
         </div>
 
@@ -77,7 +97,7 @@
             <div class="flex space-x-3 message-animate">
                 <div class="flex-shrink-0">
                     <div class="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center">
-                        <i class="fas fa-university text-blue-900"></i>
+                        <i class="fas fa-robot text-blue-900"></i>
                     </div>
                 </div>
                 <div class="bg-blue-50 rounded-lg p-3 max-w-[80%]">
@@ -99,17 +119,14 @@
 
         <!-- Input Area -->
         <div class="border-t p-4 bg-gray-50">
-            <!-- ... input area content ... -->
-            <div class="relative">
+            <div class="relative flex items-end">
                 <textarea id="message-input" rows="1"
-                          class="w-full p-3 pr-12 rounded-lg border border-gray-300 focus:border-blue-900 focus:ring-2 focus:ring-blue-200 resize-none transition"
+                          class="w-full p-4 pr-14 rounded-lg border border-gray-300 focus:border-blue-900 focus:ring-2 focus:ring-blue-200 resize-none transition"
                           placeholder="Введите ваше сообщение..."></textarea>
-                <div class="absolute right-3 bottom-3 flex space-x-2">
-                    <button id="send-button"
-                            class="w-10 h-10 rounded-full bg-blue-900 text-white flex items-center justify-center hover:bg-orange-500 transition">
-                        <i class="fas fa-paper-plane"></i>
-                    </button>
-                </div>
+                <button id="send-button"
+                        class="absolute right-2 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-blue-900 text-white flex items-center justify-center hover:bg-orange-500 transition">
+                    <i class="fas fa-paper-plane"></i>
+                </button>
             </div>
             <p class="text-xs text-gray-500 mt-2 text-center">
                 Газпромбанк рекомендует проверять важную информацию через официальный сайт.
@@ -130,7 +147,7 @@
             el.className = `flex space-x-3 message-animate justify-end`;
             el.innerHTML = `
               <div class="bg-blue-900 text-white rounded-lg p-3 max-w-[80%]">
-                <div class="prose prose-sm max-w-none text-white">${marked.parse(text)}</div> <!-- Добавлен класс text-white для prose -->
+                <div class="prose prose-sm max-w-none text-white">${marked.parse(text)}</div>
               </div>
               <div class="flex-shrink-0">
                 <div class="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center">
@@ -151,7 +168,7 @@
             el.innerHTML = `
                <div class="flex-shrink-0">
                  <div class="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center">
-                   <i class="fas fa-university text-blue-900"></i>
+                   <i class="fas fa-robot text-blue-900"></i>
                  </div>
                </div>
                <div class="bg-blue-50 rounded-lg p-3 max-w-[80%]">
@@ -280,7 +297,7 @@
             tip.innerHTML = `
               <div class="flex-shrink-0">
                 <div class="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center">
-                  <i class="fas fa-university text-blue-900"></i>
+                  <i class="fas fa-robot text-blue-900"></i>
                 </div>
               </div>
               <div class="bg-blue-50 rounded-lg p-3 max-w-[80%]">

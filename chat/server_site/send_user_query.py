@@ -245,32 +245,24 @@ class AsyncLlmRpcClient:
 
     async def _publish_message(self, corr_id, request_body, reply_to_queue):
         """Publishes a message to the task queue."""
-        await self._ensure_connection()  # Make sure connection is ready
+        await self._ensure_connection()
 
         message = aio_pika.Message(
             body=request_body.encode(),
             correlation_id=corr_id,
             reply_to=reply_to_queue,
             content_type='application/json',
-            delivery_mode=aio_pika.DeliveryMode.PERSISTENT  # Optional: make durable
+            delivery_mode=aio_pika.DeliveryMode.PERSISTENT
         )
         try:
-            # Use default exchange for routing via routing_key (queue name)
             await self.channel.default_exchange.publish(
                 message,
                 routing_key=TASK_QUEUE_NAME
             )
             log.info(f" [x] Message published (CorrID: {corr_id})")
             return True
-        except (ChannelClosed, ConnectionClosed) as e:
-            log.error(f" [!] Failed to publish message due to closed channel/connection: {e}")
-            # Don't raise here, let _ensure_connection handle reconnect on next call
-            # But signal failure for this specific publish attempt
-            return False
         except Exception as e:
             log.exception(f" [!] Unexpected error publishing message (CorrID: {corr_id}): {e}")
-            # Consider closing connection on severe errors
-            # await self._safe_close()
             return False
 
     async def call(self, user_message, user_id="default_user", timeout_sec=DEFAULT_TIMEOUT):
@@ -283,7 +275,6 @@ class AsyncLlmRpcClient:
         request_body = json.dumps({
             'user_id': user_id,
             'message': user_message,
-            # 'stream': False # Optional indicator
         })
 
         log.info(f" [x] Sending request (call) '{user_message[:30]}...' (ID: {corr_id})")
@@ -309,7 +300,6 @@ class AsyncLlmRpcClient:
             log.exception(f" [!] Error waiting for future {corr_id}: {e}")
             return {"error": f"Error waiting for response: {e}"}
         finally:
-            # Always remove the future when done
             if corr_id in self._response_futures:
                 del self._response_futures[corr_id]
 
@@ -327,7 +317,7 @@ class AsyncLlmRpcClient:
         """
         await self._ensure_connection()
         corr_id = str(uuid.uuid4())
-        queue = asyncio.Queue()  # Buffer for this stream
+        queue = asyncio.Queue()
         self._stream_queues[corr_id] = queue
 
         request_body = json.dumps({
@@ -347,7 +337,6 @@ class AsyncLlmRpcClient:
         try:
             while True:
                 try:
-                    # Wait for the next item from the queue with inactivity timeout
                     item = await asyncio.wait_for(queue.get(), timeout=timeout_sec)
 
                     if item is STREAM_END_MARKER:
@@ -356,9 +345,8 @@ class AsyncLlmRpcClient:
                     elif item is STREAM_ERROR_MARKER:
                         error_content = "Unknown stream error"
                         try:
-                            # Error content should be the next item, get it quickly
                             error_content = await asyncio.wait_for(queue.get(), timeout=1)
-                            queue.task_done()  # Mark error content retrieval done
+                            queue.task_done()
                         except asyncio.TimeoutError:
                             log.warning(f"Timeout getting error content for stream {corr_id}")
                         except asyncio.QueueEmpty:
@@ -366,26 +354,22 @@ class AsyncLlmRpcClient:
                         log.error(f" [!] Stream {corr_id} ended with error: {error_content}")
                         raise RuntimeError(f"Stream error from worker or processing: {error_content}")
                     else:
-                        # It's a regular chunk
-                        # log.debug(f" [.] Yielding chunk for {corr_id}")
                         yield item
-                        queue.task_done()  # Mark chunk processing done
+                        queue.task_done()
 
                 except asyncio.TimeoutError:
                     log.error(f" [!] Stream {corr_id} timed out due to inactivity after {timeout_sec} seconds.")
                     raise TimeoutError(f"Stream timed out due to inactivity after {timeout_sec} seconds")
                 except asyncio.CancelledError:
                     log.warning(f" [!] Stream {corr_id} was cancelled during wait.")
-                    raise  # Re-raise cancellation
+                    raise
                 except Exception as e:
                     log.exception(f"[!] Unexpected error getting item from stream queue {corr_id}: {e}")
                     raise RuntimeError(f"Internal error processing stream queue: {e}") from e
 
         finally:
-            # Clean up the queue for this correlation ID when generator exits
             if corr_id in self._stream_queues:
                 log.info(f" [.] Cleaning up queue for stream {corr_id}")
-                # Drain queue to prevent tasks getting stuck if consumer adds more
                 while not queue.empty():
                     with suppress(asyncio.QueueEmpty):
                         queue.get_nowait()
@@ -405,7 +389,7 @@ class AsyncLlmRpcClient:
 
         if self.channel and not self.channel.is_closed:
             log.info(" [*] Closing channel...")
-            with suppress(Exception):  # Suppress errors during close
+            with suppress(Exception):
                 await self.channel.close()
             log.info(" [*] Channel closed.")
             self.channel = None
@@ -418,7 +402,6 @@ class AsyncLlmRpcClient:
             self.connection = None
 
         self.callback_queue = None
-        # Fail any requests still pending after trying to close
         self._fail_pending_requests("Client closed")
         log.info(" [*] Safe close finished.")
 
@@ -426,52 +409,3 @@ class AsyncLlmRpcClient:
         """Public method to explicitly close the client connection."""
         log.info(" [*] Closing connection via close() method.")
         await self._safe_close()
-
-
-# Example Async Usage (requires an async context)
-async def main():
-    client = AsyncLlmRpcClient()
-
-    # Ensure connection before making calls
-    # await client._connect() # Or let the first call/stream handle it
-
-    # --- Example Call ---
-    print("\n--- Testing Call ---")
-    call_prompt = "What is the capital of France?"
-    response = await client.call(call_prompt, timeout_sec=10)
-    print(f"Call Response: {response}")
-
-    await asyncio.sleep(1)  # Small delay
-
-    # --- Example Stream ---
-    print("\n--- Testing Stream ---")
-    stream_prompt = "List 5 popular dog breeds, one per line."
-    full_stream_response = ""
-    try:
-        async for chunk in client.stream(stream_prompt, timeout_sec=20):  # Increased inactivity timeout
-            print(f"  [.] Stream Chunk: '{chunk.strip()}'")
-            full_stream_response = chunk  # Keep track of the latest full state if needed
-        print("\n [.] Stream finished successfully.")
-        # print("\n [.] Final assembled stream content:") # Only if assembling delta chunks
-        # print(full_stream_response)
-    except TimeoutError as e:
-        print(f" [!] Stream timed out: {e}")
-    except ConnectionError as e:
-        print(f" [!] Stream connection error: {e}")
-    except RuntimeError as e:
-        print(f" [!] Stream runtime error: {e}")
-    except Exception as e:
-        print(f" [!] Unexpected error during stream: {e}")
-
-    # --- Clean up ---
-    print("\n--- Closing Client ---")
-    await client.close()
-    print("--- Done ---")
-
-
-if __name__ == "__main__":
-    # Run the async main function
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        print("\nInterrupted by user.")
