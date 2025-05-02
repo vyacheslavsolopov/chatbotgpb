@@ -4,6 +4,7 @@ import json
 from django.shortcuts import render, redirect
 from django.http import StreamingHttpResponse, JsonResponse  # Изменено
 from django.urls import reverse
+# from django.urls import reverse
 from django.views.decorators.csrf import csrf_exempt, csrf_protect
 from django.views.decorators.http import require_POST, require_GET
 
@@ -11,6 +12,13 @@ from .qdrant.search import get_relevant_chunks
 from .server_site.send_user_query import AsyncLlmRpcClient
 
 llm_client = AsyncLlmRpcClient()
+
+
+# try:
+#     print(reverse('chat:index'))
+#     print(reverse('chat:handle_upload'))
+# except Exception as e:
+#     print(f"Error reversing URL: {e}")
 
 
 @csrf_exempt
@@ -62,25 +70,25 @@ async def stream_llm_response(user_msg):
 
 @require_GET
 def upload_page(request):
-    return render(request, 'chat/upload.html')
+    return render(request, 'chat/upload.html',
+                  {
+                      'upload_submit_url': 'http://127.0.0.1:8000/submit/'
+                  })
 
 
 @require_POST
 def handle_upload(request):
     try:
         # Retrieve data from the POST request
-        doc_type = request.POST.get('document_type')  # Get selected type
         uploaded_file = request.FILES.get('file-upload')  # Get the uploaded file
 
         if not uploaded_file:
             return JsonResponse({'error': 'Файл не был загружен.'}, status=400)
-        if not doc_type:
-            return JsonResponse({'error': 'Тип документа не выбран.'}, status=400)
 
         # --- !! Placeholder: Process the uploaded file here !! ---
         # Example: Save the file, update database, call another service, etc.
         print(f"Received file: {uploaded_file.name}")
-        print(f"Document type: {doc_type}")
+        # print(f"Document type: {doc_type}")
         print(f"File size: {uploaded_file.size}")
         print(f"Content type: {uploaded_file.content_type}")
 
