@@ -1,5 +1,8 @@
 import asyncio
 import json
+import os
+import io
+import uuid
 
 from django.shortcuts import render, redirect
 from django.http import StreamingHttpResponse, JsonResponse  # Изменено
@@ -10,6 +13,15 @@ from django.views.decorators.http import require_POST, require_GET
 
 from .qdrant.search import get_relevant_chunks
 from .server_site.send_user_query import AsyncLlmRpcClient
+from .qdrant.parsing import (
+    extract_text_from_pdf,
+    extract_text_from_docx,
+    chunk_text,
+    get_embeddings,
+    client as qdrant_client,
+    COLLECTION_NAME,
+    BATCH_SIZE,
+)
 
 llm_client = AsyncLlmRpcClient()
 
@@ -77,39 +89,48 @@ def upload_page(request):
 
 
 @require_POST
+@csrf_exempt
 def handle_upload(request):
-    try:
-        # Retrieve data from the POST request
-        uploaded_file = request.FILES.get('file-upload')  # Get the uploaded file
+    uploaded = request.FILES.get('file-upload')
+    if not uploaded:
+        return JsonResponse({'error': 'Файл не был загружен.'}, status=400)
 
-        if not uploaded_file:
-            return JsonResponse({'error': 'Файл не был загружен.'}, status=400)
+    name = uploaded.name.lower()
+    ext = os.path.splitext(name)[1]
+    if ext not in ('.pdf', '.docx', '.txt'):
+        return JsonResponse({'error': 'Недопустимый тип файла.'}, status=400)
+    if uploaded.size > 100 * 1024 * 1024:
+        return JsonResponse({'error': 'Размер файла превышает 100 MB.'}, status=400)
 
-        # --- !! Placeholder: Process the uploaded file here !! ---
-        # Example: Save the file, update database, call another service, etc.
-        print(f"Received file: {uploaded_file.name}")
-        # print(f"Document type: {doc_type}")
-        print(f"File size: {uploaded_file.size}")
-        print(f"Content type: {uploaded_file.content_type}")
+    # Читаем весь файл в память
+    data = uploaded.read()
+    # Извлекаем текст
+    if ext == '.pdf':
+        text = extract_text_from_pdf(io.BytesIO(data))
+    elif ext == '.docx':
+        text = extract_text_from_docx(io.BytesIO(data))
+    else:  # .txt
+        text = data.decode(errors='ignore')
 
-        # Example: Saving the file (Make sure MEDIA_ROOT is configured in settings.py)
-        # file_path = os.path.join(settings.MEDIA_ROOT, 'uploads', uploaded_file.name)
-        # os.makedirs(os.path.dirname(file_path), exist_ok=True) # Create directory if needed
-        # with open(file_path, 'wb+') as destination:
-        #     for chunk in uploaded_file.chunks():
-        #         destination.write(chunk)
-        # print(f"File saved to: {file_path}")
-        # --- End Placeholder ---
+    # Чанки и эмбеддинги
+    chunks = chunk_text(text)
+    embeddings = get_embeddings(chunks)
 
-        # Respond to the frontend. Since the JS expects a redirect on success,
-        # we redirect back to the chat index page.
-        # Assumes your chat index URL is named 'index' in your urls.py
-        # Adjust 'chat:index' if your app_name or url name is different
-        return redirect(reverse('chat:index'))
-    except Exception as e:
-        print(f"Ошибка при обработке загрузки файла: {e}")
-        # Return an error response that the JS might handle (optional)
-        return JsonResponse({'error': 'Внутренняя ошибка сервера при обработке файла.'}, status=500)
+    # Готовим точки и заливаем в Qdrant
+    points = []
+    for chunk, emb in zip(chunks, embeddings):
+        points.append({
+            'id': str(uuid.uuid4()),
+            'vector': emb,
+            'payload': {'text': chunk, 'source': name}
+        })
+        if len(points) >= BATCH_SIZE:
+            qdrant_client.upsert(collection_name=COLLECTION_NAME, points=points)
+            points.clear()
+    if points:
+        qdrant_client.upsert(collection_name=COLLECTION_NAME, points=points)
+
+    return redirect(reverse('chat:index'))
 
 
 @csrf_exempt
